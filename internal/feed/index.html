@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, nocache">
+    <title>BetaWatch</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #1a1a1a;
+            --muted: #666;
+            --line: #e2e2e2;
+            --head: #f6f6f6;
+            --accent: #0a7d3f;
+            --badge: #ececec;
+            --badge-fg: #3a3a3a;
+            --badge-rock: #dceee2;
+            --badge-rock-fg: #14532d;
+            --badge-gym: #e4e6f5;
+            --badge-gym-fg: #313a75;
+            --warn: #fdf3e3;
+            --warn-hover: #f9e9d0;
+            --warn-edge: #b7791f;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181c;
+                --fg: #e8e8e8;
+                --muted: #9a9a9a;
+                --line: #2c2f36;
+                --head: #1e2127;
+                --accent: #4ade80;
+                --badge: #2a2e36;
+                --badge-fg: #c7c7c7;
+                --badge-rock: #1c3a29;
+                --badge-rock-fg: #86efac;
+                --badge-gym: #272b46;
+                --badge-gym-fg: #aeb6f4;
+                --warn: #33280f;
+                --warn-hover: #403113;
+                --warn-edge: #e3a53c;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+        }
+
+        header {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        #status {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        #status::before {
+            content: "● ";
+        }
+
+        #status.live::before {
+            color: var(--accent);
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        #status.down::before {
+            color: #d14;
+        }
+
+        /* A slow pulse says the stream is open, without pulling the eye from
+           the table. */
+        @keyframes pulse {
+            50% {
+                opacity: .25;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            #status.live::before {
+                animation: none;
+            }
+        }
+
+        #count {
+            color: var(--muted);
+            font-size: 13px;
+            margin-left: auto;
+        }
+
+        a.site {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            min-width: 720px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 7px 10px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: var(--head);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
+        }
+
+        td.time, td.act {
+            white-space: nowrap;
+        }
+
+        td.time {
+            color: var(--muted);
+            cursor: help;
+        }
+
+        td.tags {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px solid var(--line);
+        }
+
+        a:hover {
+            border-bottom-color: currentColor;
+        }
+
+        /* Expandable rows */
+        tr.main {
+            cursor: pointer;
+        }
+
+        tr.main:hover {
+            background: var(--head);
+        }
+
+        tr.main.open {
+            background: var(--head);
+        }
+
+        /* A tag listed under unwanted_tags: worth a look, not an error. */
+        tr.main.unwanted > td {
+            background: var(--warn);
+        }
+
+        tr.main.unwanted:hover > td, tr.main.unwanted.open > td {
+            background: var(--warn-hover);
+        }
+
+        tr.main.unwanted td.chev {
+            box-shadow: inset 3px 0 0 var(--warn-edge);
+        }
+
+        th.chev, td.chev {
+            width: 1.6em;
+            padding-right: 0;
+            text-align: center;
+            color: var(--muted);
+            user-select: none;
+        }
+
+        tr.detail > td {
+            padding: 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .detailbox {
+            padding: 12px 14px 12px 38px;
+            background: var(--head);
+        }
+
+        .meta {
+            margin-top: 14px;
+            padding-top: 10px;
+            border-top: 1px solid var(--line);
+        }
+
+        .field {
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+
+        .field:last-child {
+            margin-bottom: 0;
+        }
+
+        .label {
+            /* Padding rather than width alone: "BAD VALUES" and "UNWANTED" are
+               wider than the minimum and would otherwise touch their value. */
+            display: inline-block;
+            min-width: 72px;
+            padding-right: 12px;
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        table.tags {
+            width: auto;
+            min-width: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12.5px;
+        }
+
+        table.tags td {
+            padding: 2px 16px 2px 0;
+            border: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        table.tags td.k {
+            color: var(--muted);
+        }
+
+        table.tags a {
+            border-bottom-color: var(--line);
+        }
+
+        /* The keys that put this change in the list. */
+        table.tags td.k.hit {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        table.tags td.k.bad {
+            color: var(--warn-edge);
+            font-weight: 600;
+        }
+
+        table.tags td.badval {
+            color: var(--warn-edge);
+        }
+
+        /* The pattern the value should have matched. */
+        table.tags .why {
+            margin-left: 8px;
+            color: var(--muted);
+            font-size: 11.5px;
+            opacity: .85;
+        }
+
+        .field .label {
+            vertical-align: top;
+        }
+
+        /* Tags and photos side by side; the photos drop below on a narrow
+           screen rather than squeezing the tags. */
+        .top {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .top > table.tags {
+            flex: 1 1 22em;
+        }
+
+        .photos {
+            flex: 0 1 auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-width: 100%;
+        }
+
+        img.photo {
+            max-height: 190px;
+            max-width: 100%;
+            border-radius: 4px;
+            background: var(--head);
+        }
+
+        td.classes {
+            white-space: nowrap;
+        }
+
+        td.etype {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .badge {
+            display: inline-block;
+            margin-right: 4px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--badge);
+            color: var(--badge-fg);
+        }
+
+        /* Rock features against artificial ones, so the kind of place a
+           change touches is readable at a glance. */
+        .badge.route, .badge.crag, .badge.area {
+            background: var(--badge-rock);
+            color: var(--badge-rock-fg);
+        }
+
+        .badge.gym {
+            background: var(--badge-gym);
+            color: var(--badge-gym-fg);
+        }
+
+        .act {
+            font-weight: 600;
+        }
+
+        .create {
+            color: var(--accent);
+        }
+
+        .delete {
+            color: #d14;
+        }
+
+        .modify {
+            color: #b7791f;
+        }
+
+        /* Briefly highlight a row as it arrives. */
+        @keyframes flash {
+            from {
+                background: color-mix(in srgb, var(--accent) 22%, transparent);
+            }
+        }
+
+        tr.new {
+            animation: flash 1.6s ease-out;
+        }
+
+        #empty {
+            color: var(--muted);
+            padding: 24px 10px;
+        }
+
+        footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            align-items: center;
+            margin-top: 28px;
+            padding-top: 14px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 12.5px;
+        }
+
+        footer a {
+            color: inherit;
+        }
+
+        footer a:hover {
+            color: var(--fg);
+        }
+
+        /* The mark sits on the text baseline rather than above it. */
+        footer svg {
+            vertical-align: -2px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>BetaWatch</h1>
+    <span id="status">connecting…</span>
+    <span id="count"></span>
+    <a class="site" href="https://openclimbing.org/" target="_blank" rel="noopener">openclimbing.org</a>
+</header>
+
+<div class="wrap">
+    <table>
+        <thead>
+        <tr>
+            <th class="chev"></th>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Type</th>
+            <th>Class</th>
+            <th>Name</th>
+            <th>User</th>
+            <th>Links</th>
+        </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+    </table>
+</div>
+<div id="empty">No changes yet — waiting for the next one…</div>
+
+<footer>
+    <a href="https://github.com/elnappo/betawatch/" target="_blank" rel="noopener">
+        <!-- GitHub's own mark, inlined: the page loads nothing external. -->
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+        1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+        0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2
+        .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
+        3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+        </svg>
+        github.com/elnappo/betawatch
+    </a>
+    <span>
+    Data from <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>
+    contributors, available under the
+    <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>.
+    Photos from <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>.
+  </span>
+</footer>
+
+<script>
+    const rows = document.getElementById('rows');
+    const statusEl = document.getElementById('status');
+    const countEl = document.getElementById('count');
+    const emptyEl = document.getElementById('empty');
+
+    // How many changes the table holds before dropping the oldest.
+    const maxRows = 500;
+
+    let total = 0;
+    // Remembered so a reconnect resumes rather than replaying everything.
+    let lastId = 0;
+
+    // ago renders how long ago a change was made. Rows span a week, and a
+    // gap of minutes reads more clearly than a wall clock time.
+    const ago = d => {
+        const secs = Math.round((Date.now() - d) / 1000);
+        // Negative means clock skew against the server, not the future.
+        if (secs < 10) return 'just now';
+        if (secs < 60) return secs + 's ago';
+        const mins = Math.round(secs / 60);
+        if (mins < 60) return mins + ' min ago';
+        const hours = Math.round(mins / 60);
+        if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
+        const days = Math.round(hours / 24);
+        return days + (days === 1 ? ' day ago' : ' days ago');
+    };
+
+    // The exact time, in the reader's own zone and with its name, for the
+    // tooltip. The feed itself is UTC.
+    const exact = new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'long',
+    });
+
+    const cell = (row, text, cls) => {
+        const td = row.insertCell();
+        if (cls) td.className = cls;
+        td.textContent = text ?? '';
+        return td;
+    };
+
+    const link = (td, href, text) => {
+        const a = document.createElement('a');
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = text;
+        td.append(a);
+        return a;
+    };
+
+    // commonsFiles returns the Commons file names on a change. Photos live
+    // in wikimedia_commons and its numbered variants; a Category: value is
+    // not a file, and :path holds topo line coordinates, not an image.
+    const commonsFiles = c => Object.entries(c.tags || {})
+        .filter(([k, v]) => k.startsWith('wikimedia_commons') && !k.endsWith(':path')
+            && v.startsWith('File:'))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, v]) => v.slice('File:'.length));
+
+    // Special:FilePath redirects to a thumbnail, so the size is asked for
+    // rather than built from the file's hash.
+    const thumbURL = (file, width) =>
+        'https://commons.wikimedia.org/wiki/Special:FilePath/' +
+        encodeURIComponent(file) + '?width=' + width;
+
+    // The file page carries the author and licence, which the licence asks
+    // us to credit, so every image links to it.
+    const filePageURL = file =>
+        'https://commons.wikimedia.org/wiki/File:' + encodeURIComponent(file);
+
+    // thumb builds an image that removes itself if Commons cannot serve it.
+    function thumb(file, width, cls) {
+        const img = document.createElement('img');
+        img.className = cls;
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.alt = file;
+        img.title = file;
+        img.src = thumbURL(file, width);
+        img.addEventListener('error', () => img.remove());
+        return img;
+    }
+
+    // tagURL returns where a tag value points, or null when it is not a
+    // link. Several OSM keys hold a reference rather than a plain value.
+    function tagURL(key, value) {
+        const v = value.trim();
+        if (!v) return null;
+
+        // Commons: a File: or Category: page, both of which exist.
+        if (key === 'wikimedia_commons' || /^wikimedia_commons:\d+$/.test(key)) {
+            return /^(File|Category):/.test(v)
+                ? 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(v.replace(/ /g, '_'))
+                : null;
+        }
+
+        // wikidata holds a Q item; some keys hold several, separated by ";".
+        if (key === 'wikidata' || key.endsWith(':wikidata')) {
+            return /^Q\d+$/.test(v) ? 'https://www.wikidata.org/wiki/' + v : null;
+        }
+
+        // wikipedia is "lang:Title", which picks the language subdomain.
+        if (key === 'wikipedia') {
+            const m = v.match(/^([a-z-]{2,12}):(.+)$/);
+            if (!m) return null;
+            return 'https://' + m[1] + '.wikipedia.org/wiki/' +
+                encodeURIComponent(m[2].replace(/ /g, '_'));
+        }
+        // The "lang:wikipedia" spelling names the language in the key.
+        const lang = key.match(/^([a-z-]{2,12}):wikipedia$/);
+        if (lang) {
+            return 'https://' + lang[1] + '.wikipedia.org/wiki/' +
+                encodeURIComponent(v.replace(/ /g, '_'));
+        }
+
+        // Plain web addresses. climbing:url:* covers the external guide links.
+        if (key === 'website' || key === 'url' || key === 'contact:website' ||
+            key.startsWith('climbing:url')) {
+            if (/^https?:\/\//i.test(v)) return v;
+            // A bare host is common; assume https rather than dropping the link.
+            if (/^[\w-]+(\.[\w-]+)+(\/|$)/.test(v)) return 'https://' + v;
+            return null;
+        }
+        return null;
+    }
+
+    // field builds one labelled line of the detail panel.
+    const field = (label, text) => {
+        const div = document.createElement('div');
+        div.className = 'field';
+        const l = document.createElement('span');
+        l.className = 'label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.textContent = text;
+        div.append(l, v);
+        return div;
+    };
+
+    // detailRow builds the hidden row holding everything not worth a column
+    // of its own: the element's full tag set, then how it got here.
+    function detailRow(c) {
+        const row = document.createElement('tr');
+        row.className = 'detail';
+        row.hidden = true;
+
+        const td = row.insertCell();
+        td.colSpan = 8;
+
+        const box = document.createElement('div');
+        box.className = 'detailbox';
+
+        // Tags on the left, photos beside them. Both are only built when the
+        // row is opened, so an unopened row costs no image requests.
+        const top = document.createElement('div');
+        top.className = 'top';
+
+        const matched = new Set(c.matched_keys || []);
+        const unwanted = new Set(c.unwanted || []);
+        // A value that fails its tag_values_regex: the key is fine, the value
+        // is not, so the pattern is shown next to it.
+        const bad = new Map((c.bad_values || []).map(b => [b.key, b.regex]));
+        const tags = c.tags || {};
+        const keys = Object.keys(tags).sort();
+        if (keys.length) {
+            const table = document.createElement('table');
+            table.className = 'tags';
+            for (const k of keys) {
+                const tr = table.insertRow();
+                const kt = tr.insertCell();
+                kt.className = 'k' + (matched.has(k) ? ' hit' : '') +
+                    (unwanted.has(k) || bad.has(k) ? ' bad' : '');
+                kt.textContent = k;
+
+                const vt = tr.insertCell();
+                const href = tagURL(k, tags[k]);
+                if (href) {
+                    link(vt, href, tags[k]);
+                } else {
+                    vt.textContent = tags[k];
+                }
+                if (bad.has(k)) {
+                    vt.classList.add('badval');
+                    const why = document.createElement('span');
+                    why.className = 'why';
+                    why.textContent = 'want ' + bad.get(k);
+                    vt.append(why);
+                }
+            }
+            top.append(table);
+        }
+
+        const files = commonsFiles(c);
+        if (files.length) {
+            const strip = document.createElement('div');
+            strip.className = 'photos';
+            for (const f of files) {
+                const a = document.createElement('a');
+                a.href = filePageURL(f);
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.append(thumb(f, 320, 'photo'));
+                strip.append(a);
+            }
+            top.append(strip);
+        }
+        box.append(top);
+
+        // Below a rule: why this change is in the table, and where it came
+        // from. Useful when checking the filter, not when reading the change.
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        if (c.unwanted && c.unwanted.length) {
+            meta.append(field('unwanted', c.unwanted.join(', ')));
+        }
+        if (c.bad_values && c.bad_values.length) {
+            meta.append(field('bad values', c.bad_values.map(b => b.key).join(', ')));
+        }
+        if (matched.size) {
+            meta.append(field('matched', [...matched].join(', ')));
+        }
+        meta.append(field('version', 'v' + c.version + ' · changeset ' + c.changeset +
+            (c.uid ? ' · uid ' + c.uid : '') +
+            (c.minute ? ' · minute ' + c.minute : '')));
+        box.append(meta);
+
+        td.append(box);
+        return row;
+    }
+
+    function addRow(c, isNew = true) {
+        const row = rows.insertRow(0);
+        // An unwanted tag is worth a look, so the row is tinted.
+        const flagged = (c.unwanted && c.unwanted.length) ||
+            (c.bad_values && c.bad_values.length);
+        row.className = 'main' + (isNew ? ' new' : '') + (flagged ? ' unwanted' : '');
+
+        cell(row, '▸', 'chev');
+
+        const when = new Date(c.timestamp);
+        const time = cell(row, '', 'time');
+        if (isNaN(when)) {
+            time.textContent = '—';
+        } else {
+            // Keep the date on the cell so the relative text can be refreshed
+            // without rebuilding the row.
+            time.dataset.ts = when.toISOString();
+            time.textContent = ago(when);
+            time.title = exact.format(when);
+        }
+        cell(row, c.action, 'act ' + c.action);
+
+        cell(row, c.type, 'etype');
+
+        // One badge per classify label. An object can match several, and an
+        // object matching none shows nothing rather than a placeholder.
+        const cls = row.insertCell();
+        cls.className = 'classes';
+        for (const name of c.classes || []) {
+            const b = document.createElement('span');
+            b.className = 'badge ' + name;
+            b.textContent = name;
+            cls.append(b);
+        }
+        cell(row, c.name || '—');
+        const who = row.insertCell();
+        if (c.user) {
+            // A username can hold spaces and other characters that need escaping;
+            // osm.org itself writes them percent-encoded.
+            link(who, 'https://www.openstreetmap.org/user/' + encodeURIComponent(c.user), c.user);
+        } else {
+            who.textContent = '(anonymous)';
+        }
+
+        const links = row.insertCell();
+        link(links, c.url, c.type + '/' + c.id);
+        links.append(' · ');
+        link(links, c.changeset_url, 'cs');
+        links.append(' · ');
+        // openclimbing.org renders the climbing view of the same element.
+        link(links, 'https://openclimbing.org/' + c.type + '/' + c.id, 'oc');
+
+        const detail = detailRow(c);
+        row.after(detail);
+
+        row.addEventListener('click', e => {
+            // Let the osm.org links work without also toggling the row.
+            if (e.target.closest('a')) return;
+            detail.hidden = !detail.hidden;
+            row.classList.toggle('open', !detail.hidden);
+            row.cells[0].textContent = detail.hidden ? '▸' : '▾';
+        });
+
+        total++;
+        countEl.textContent = total + (total === 1 ? ' change' : ' changes');
+        emptyEl.hidden = true;
+
+        // Keep the page bounded on a long-running session. Each change is a
+        // main row plus its detail row, so the limit counts pairs.
+        while (rows.rows.length > 2 * maxRows) {
+            rows.deleteRow(rows.rows.length - 1); // detail
+            rows.deleteRow(rows.rows.length - 1); // its main row
+        }
+    }
+
+    // Relative times go stale on their own, so refresh them. A minute is
+    // finer than the shortest step the text shows after the first minute.
+    function refreshTimes() {
+        for (const td of rows.querySelectorAll('td.time[data-ts]')) {
+            td.textContent = ago(new Date(td.dataset.ts));
+        }
+    }
+
+    setInterval(refreshTimes, 30000);
+
+    function connect() {
+        // EventSource resends Last-Event-ID itself on an automatic retry; the
+        // query parameter covers the first connection, which resumes from
+        // whatever the history call already showed.
+        const es = new EventSource('events?lastEventId=' + lastId);
+
+        es.onopen = () => {
+            statusEl.textContent = 'live';
+            statusEl.className = 'live';
+        };
+
+        es.onmessage = e => {
+            if (e.lastEventId) lastId = Number(e.lastEventId);
+            try {
+                addRow(JSON.parse(e.data));
+            } catch (err) {
+                console.error('bad event', err, e.data);
+            }
+        };
+
+        es.onerror = () => {
+            statusEl.textContent = 'reconnecting…';
+            statusEl.className = 'down';
+            // EventSource retries on its own; nothing to do here.
+        };
+    }
+
+    // Load the past changes first, then stream from where they end. The
+    // history response carries its own last event id, so a change arriving
+    // between the two requests is replayed rather than lost.
+    async function start() {
+        statusEl.textContent = 'loading history…';
+        try {
+            const res = await fetch('api/changes');
+            const {last_event_id, changes} = await res.json();
+            // changes is newest first, so add oldest first to keep that order.
+            for (let i = changes.length - 1; i >= 0; i--) addRow(changes[i], false);
+            lastId = last_event_id || 0;
+        } catch (err) {
+            console.error('history', err);
+        }
+        connect();
+    }
+
+    start();
+</script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+# Which objects to add to the database, uses the osmium-tags-filter syntax.
+select:
+  - "climbing"
+  - "climbing:*"
+  - "sport=*climbing"
+  - "sport=*boulder"
+  - "path=climbing_access"
+  - "leisure=climbing"
+
+# Address to serve the live web view on (e.g., ":8080").
+# Empty to disable the web view.
+http_addr: ":8080"
+
+# File to keep recent changes.
+# Empty to disable storage.
+store_file: "changes.ndjson"
+
+# File to record the last processed minute.
+# Empty to disable state tracking.
+state_file: "state.json"
+
+# How far back to keep changes (e.g., "168h" for 7 days, "24h", "48h").
+retain_duration: "168h"
+
+# How far back to catch up on first run (e.g., "2h", "6h", "24h").
+backfill_duration: "1h"
+
+# Descriptive labels for a selected object. These never affect selection,
+# and an object can carry several.
+classify:
+  route:
+    - "climbing=route,route_bottom,route_top"
+  crag:
+    - "climbing=crag"
+  area:
+    - "climbing=area"
+  gym:
+    - "leisure=sports_centre,sports_hall,pitch"
+    - "tower:type=climbing"
+    - "indoor=yes"
+  natural:
+    - "natural=cliff,rock,stone,bare_rock"
+  path:
+    - "path=climbing_access"
+    - "highway=path"
+  boulder:
+    - "climbing=boulder"
+    - "climbing:boulder!=no"
+  sport:
+    - "climbing:sport!=no"
+  trad:
+    - "climbing:trad!=no"
+  mixed:
+    - "climbing:mixed!=no"
+  ice:
+    - "climbing:ice!=no"
+  dry:
+    - "climbing:dry!=no"
+  aid:
+    - "climbing:aid!=no"
+  building:
+    - "building"
+  shop:
+    - "shop"
+
+# Tags that we don't want to see on climbing objects.
+unwanted_tags:
+  - "climbing!=route,route_bottom,route_top,boulder,crag,area,anchor"
+  - "climbing:adventure"
+  - "climbing:area"
+  - "climbing:bottomrope"
+  - "climbing:boulder_stones"
+  - "climbing:boulder_wall"
+  - "climbing:bouldering"
+  - "climbing:boulders"
+  - "climbing:boulders"
+  - "climbing:chains"
+  - "climbing:descent"
+  - "climbing:feature=summit_log"
+  - "climbing:fee"
+  - "climbing:grade:fb"
+  - "climbing:grade:fontainebleau"
+  - "climbing:indoor"
+  - "climbing:length=0"
+  - "climbing:lower_off"
+  - "climbing:mountainproject"
+  - "climbing:name"
+  - "climbing:outdoor=yes"
+  - "climbing:restriction=null"
+  - "climbing:route"
+  - "climbing:route_bottom"
+  - "climbing:route_top"
+  - "climbing:safety_rope"
+  - "climbing:sector"
+  - "climbing:stone"
+  - "climbing:style=sport"
+  - "climbing:top_level"
+  - "climbing:topo"
+  - "climbing:traditional"
+  - "climbing:unknown"
+  - "climbing:url"
+  - "climbing:via_ferrata"
+  - "climbing:wall:type"
+  - "climbing:wall_height"
+  - "climbing:wall_routes"
+  - "climbing_crag"
+  - "climbing_style"
+  - "climbing_type"
+  - "climbing_wall"
+  - "leisure=climbing"
+  - "name:climbing"
+  - "rock"
+  - "site=climbing_area"
+  - "site_climbing"
+  - "sport=*boulder"
+  - "sport=*ice_climbing"
+  - "sport=*rock_climbing"
+
+# Regular expressions to validate tag values
+tag_values_regex:
+  - climbing:sport: "^(yes|[1-9][0-9]*)$"
+  - climbing:boulder: "^(yes|[1-9][0-9]*)$"
+  - climbing:trad: "^(yes|[1-9][0-9]*)$"
+  - climbing:speed: "^(yes|[1-9][0-9]*)$"
+  - climbing:toprope: "^(yes|[1-9][0-9]*)$"
+  - climbing:multipitch: "^(yes|[1-9][0-9]*)$"
+  - climbing:deepwater: "^(yes|[1-9][0-9]*)$"
+  - climbing:mixed: "^(yes|[1-9][0-9]*)$"
+  - climbing:ice: "^(yes|[1-9][0-9]*)$"
+  - climbing:dry: "^(yes|[1-9][0-9]*)$"
+  - climbing:aid: "^(yes|[1-9][0-9]*)$"
+  - climbing: "^(route|route_bottom|route_top|boulder|crag|area|anchor)$"
+  - climbing:bolts: "^[1-9][0-9]*$"
+  - climbing:length: "^[1-9][0-9]*$"
+  - climbing:pitches: "^[1-9][0-9]*$"
+  - climbing:inclination:*: "^yes$"
+  - climbing:hazard:*: "^yes$"
+  - climbing:chipped: "^yes$"
+  - climbing:routes: "^[1-9][0-9]*$"
+  - climbing:summit_log: "^yes$"
+  - ele: "^[1-9][0-9]*$"
+  - height: "^[1-9][0-9]*$"
+  - covered: "^yes$"
+  - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
+  - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
+  - climbing:url:*: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'

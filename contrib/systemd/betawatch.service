@@ -1,0 +1,26 @@
+[Unit]
+Description=BetaWatch - Live view for climbing changes on OpenStreetMap
+Documentation=https://github.com/elnappo/betawatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=betawatch
+Group=betawatch
+WorkingDirectory=/var/lib/betawatch
+ExecStart=/usr/local/bin/betawatch -config /etc/betawatch/config.yaml
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/betawatch
+
+[Install]
+WantedBy=multi-user.target

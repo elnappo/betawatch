@@ -1,0 +1,14 @@
+*
+
+*.md
+*.yaml
+*.service
+
+*.go
+go.mod
+go.sum
+
+*.html
+*.svg
+
+LICENSE
