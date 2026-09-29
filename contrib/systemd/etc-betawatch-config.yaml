@@ -124,7 +124,7 @@ tag_values_regex:
   - climbing:aid: "^(yes|[1-9][0-9]*)$"
   - climbing: "^(route|route_bottom|route_top|boulder|crag|area|anchor)$"
   - climbing:bolts: "^[1-9][0-9]*$"
-  - climbing:length: "^[1-9]\d*\s?[m]?$"
+  - climbing:length: "^[1-9][0-9]*\\s?[m]?$"
   - climbing:pitches: "^[1-9][0-9]*$"
   - climbing:inclination:*: "^yes$"
   - climbing:hazard:*: "^yes$"
@@ -132,7 +132,7 @@ tag_values_regex:
   - climbing:routes: "^[1-9][0-9]*$"
   - climbing:summit_log: "^yes$"
   - ele: "^[1-9][0-9]*$"
-  - height: "^[1-9]\d*\s?[m]?$"
+  - height: "^[1-9][0-9]*\\s?[m]?$"
   - covered: "^yes$"
   - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'

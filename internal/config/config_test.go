@@ -63,7 +63,7 @@ func realConfig(t *testing.T) *Config {
 // TestRepoConfigLoads checks the shipped config.yaml is valid, without
 // asserting anything about which tags it selects.
 func TestRepoConfigLoads(t *testing.T) {
-	if _, err := Load(filepath.Join("..", "..", "cmd", "feed", "config.yaml")); err != nil {
+	if _, err := Load(filepath.Join("..", "..", "contrib", "systemd", "etc-betawatch-config.yaml")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -345,7 +345,7 @@ func TestBadRegexFailsToLoad(t *testing.T) {
 // The config the command actually ships must load and its patterns must
 // compile.
 func TestShippedConfigRegexesCompile(t *testing.T) {
-	c, err := Load(filepath.Join("..", "..", "cmd", "feed", "config.yaml"))
+	c, err := Load(filepath.Join("..", "..", "contrib", "systemd", "etc-betawatch-config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
