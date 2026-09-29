@@ -1,10 +1,12 @@
 // Command ingest follows the OSM minute diffs and stores the elements
 // selected by config.yaml in a SQLite database, keeping the versions they
-// replace.
+// replace. Given -import-pbf, it instead imports a pre-filtered planet PBF
+// file once and exits, rather than following the minute diffs.
 //
 // Usage:
 //
 //	ingest [-config config.yaml]
+//	ingest [-config config.yaml] -import-pbf climbing.osm.pbf
 package main
 
 import (
@@ -15,9 +17,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"time"
 
 	"github.com/paulmach/osm"
+	"github.com/paulmach/osm/osmpbf"
 	"github.com/paulmach/osm/replication"
 
 	"github.com/elnappo/betawatch/internal/config"
@@ -29,8 +33,14 @@ import (
 // published every minute.
 const pollInterval = 30 * time.Second
 
+// importBatchSize is how many elements go into one import transaction. A
+// crash or Ctrl-C loses at most one batch; the rerun is cheap since Save
+// ignores versions already stored.
+const importBatchSize = 5000
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "Specify config file path")
+	importPBF := flag.String("import-pbf", "", "Import a pre-filtered planet PBF file, then exit")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -42,10 +52,75 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if err := run(ctx, cfg, cfg.DbPath, cfg.IngestStatePath, cfg.BackfillDuration); err != nil && !errors.Is(err, context.Canceled) {
+	if *importPBF != "" {
+		err = runImport(ctx, cfg.DbPath, *importPBF)
+	} else {
+		err = run(ctx, cfg, cfg.DbPath, cfg.IngestStatePath, cfg.BackfillDuration)
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// runImport stores every element of a planet PBF file. The file is expected
+// to already be filtered to climbing-related elements (e.g. by osmium
+// tags-filter), so unlike the minute diffs it is imported unconditionally,
+// without consulting cfg.Selects.
+func runImport(ctx context.Context, dbPath, pbfPath string) error {
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+
+	f, err := os.Open(pbfPath)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", pbfPath, err)
+	}
+	defer f.Close()
+
+	scanner := osmpbf.New(ctx, f, runtime.NumCPU())
+	defer scanner.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	var total int
+	for scanner.Scan() {
+		el, ok := scanner.Object().(osm.Element)
+		if !ok {
+			continue
+		}
+		// Save ignores a version that is not newer than what is already
+		// stored, so a stale or repeated import changes nothing.
+		if err := tx.Save(toElement(el)); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("saving %s: %w", el.ElementID(), err)
+		}
+		total++
+
+		if total%importBatchSize == 0 {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "imported %d elements\n", total)
+			if tx, err = db.Begin(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("scanning %s: %w", pbfPath, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "import complete: %d elements from %s\n", total, pbfPath)
+	return nil
 }
 
 func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, backfill time.Duration) error {
