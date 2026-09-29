@@ -94,9 +94,16 @@ func runImport(ctx context.Context, dbPath, pbfPath string) error {
 		if !ok {
 			continue
 		}
+		e := toElement(el)
+		if len(e.Tags) == 0 {
+			// A pre-filtered climbing extract still carries the untagged
+			// way/relation members needed for geometry; they are not
+			// climbing objects themselves.
+			continue
+		}
 		// Save ignores a version that is not newer than what is already
 		// stored, so a stale or repeated import changes nothing.
-		if err := tx.Save(toElement(el)); err != nil {
+		if err := tx.Save(e); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("saving %s: %w", el.ElementID(), err)
 		}
