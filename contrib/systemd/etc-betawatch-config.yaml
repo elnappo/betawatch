@@ -8,14 +8,18 @@ select:
   - "leisure=climbing"
 
 # Address to serve the live web view on (e.g., ":8080").
-# Empty to disable the web view.
+# Read by betawatch-feed; empty to disable the web view.
 http_addr: ":8080"
 
-# File to record the last processed minute (in /var/lib/betawatch/).
-# Empty to disable state tracking.
-state_file: "/var/lib/betawatch/state.json"
+# Path to the shared SQLite database. betawatch-ingest writes it,
+# betawatch-feed reads it.
+db_path: "/var/lib/betawatch/betawatch.db"
+
+# File recording the last processed minute, read by betawatch-ingest.
+ingest_state_path: "/var/lib/betawatch/ingest-state.json"
 
 # How far back to catch up on first run (e.g., "2h", "6h", "24h").
+# Read by betawatch-ingest.
 backfill_duration: "24h"
 
 # Descriptive labels for a selected object. These never affect selection,

@@ -1,7 +1,7 @@
 [Unit]
-Description=BetaWatch - Live view for climbing changes on OpenStreetMap
+Description=BetaWatch - Web view for climbing-related changes on OpenStreetMap
 Documentation=https://github.com/elnappo/betawatch
-After=network-online.target
+After=network-online.target betawatch-ingest.service
 Wants=network-online.target
 
 [Service]
@@ -9,7 +9,7 @@ Type=simple
 User=betawatch
 Group=betawatch
 WorkingDirectory=/var/lib/betawatch
-ExecStart=/usr/local/bin/betawatch -config /etc/betawatch/config.yaml
+ExecStart=/usr/local/bin/betawatch-feed -config /etc/betawatch/feed.yaml
 
 # Restart policy
 Restart=always
