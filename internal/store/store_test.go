@@ -64,6 +64,40 @@ func TestSaveMovesOldVersionToHistory(t *testing.T) {
 	}
 }
 
+func TestSaveOfPriorVersionFillsHistoryGap(t *testing.T) {
+	// Out-of-order arrival: version 2 goes live first, then version 1
+	// arrives after. It never becomes live, but it is the one version
+	// PreviousVersion(2) would otherwise be missing.
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(2, now.Add(time.Minute))))
+		must(t, tx.Save(el(1, now)))
+	})
+
+	if n := count(t, s, `SELECT version FROM elements WHERE id = 1 AND type = 'n'`); n != 2 {
+		t.Errorf("live version = %d, want 2", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM elements_history WHERE version = 1 AND deleted = 0`); n != 1 {
+		t.Errorf("history rows for version 1 = %d, want 1", n)
+	}
+}
+
+func TestSaveOfOlderVersionIsIgnored(t *testing.T) {
+	// A version more than one behind live adds nothing PreviousVersion can
+	// use, so it is dropped rather than stored.
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(3, now.Add(2*time.Minute))))
+		must(t, tx.Save(el(1, now)))
+	})
+
+	if n := count(t, s, `SELECT count(*) FROM elements_history`); n != 0 {
+		t.Errorf("history rows = %d, want 0", n)
+	}
+}
+
 func TestReplayIsIgnored(t *testing.T) {
 	s := open(t)
 	now := time.Now()

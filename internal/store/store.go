@@ -96,33 +96,28 @@ func (t *Tx) Has(id int64, typ string) (bool, error) {
 }
 
 // Save makes el the live version. The version it replaces moves to
-// elements_history. A version that is not newer than the live one is
-// ignored, so replaying a minute after a crash changes nothing.
+// elements_history. A version equal to the live one is a replay and is
+// ignored, so replaying a minute after a crash changes nothing. An older
+// version is not live state, but if it is the one right below the live
+// version, it fills what would otherwise be a gap in elements_history, so
+// it is stored there; anything older than that adds nothing
+// PreviousVersion can use and is ignored.
 func (t *Tx) Save(el Element) error {
 	cur, err := t.version(el.ID, el.Type)
 	if err != nil {
 		return err
 	}
-	if cur >= el.Version {
+	if el.Version < cur {
+		if cur-el.Version == 1 {
+			return t.saveHistory(el, false)
+		}
+		return nil
+	}
+	if el.Version == cur {
 		return nil
 	}
 
-	var tags any
-	if len(el.Tags) > 0 {
-		b, err := json.Marshal(el.Tags)
-		if err != nil {
-			return err
-		}
-		tags = string(b)
-	}
-
-	// The diffs do not carry the changeset itself, only which elements
-	// belong to it, so timestamp and the other changeset columns stay NULL
-	// until a metadata source is added.
-	if _, err := t.tx.Exec(`
-		INSERT INTO changesets (id, uid, user) VALUES (?, ?, ?)
-		ON CONFLICT (id) DO NOTHING`,
-		el.Changeset, el.UID, el.User); err != nil {
+	if err := t.upsertChangeset(el); err != nil {
 		return err
 	}
 
@@ -131,11 +126,61 @@ func (t *Tx) Save(el Element) error {
 			return err
 		}
 	}
+	tags, err := marshalTags(el.Tags)
+	if err != nil {
+		return err
+	}
 	_, err = t.tx.Exec(`
 		INSERT INTO elements (id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		el.ID, el.Type, el.Version, el.Lat, el.Lon, el.UID, el.User, ts(el.Timestamp), el.Changeset, tags)
 	return err
+}
+
+// upsertChangeset inserts a changeset row if missing. The diffs do not
+// carry the changeset itself, only which elements belong to it, so
+// timestamp and the other changeset columns stay NULL until a metadata
+// source is added.
+func (t *Tx) upsertChangeset(el Element) error {
+	_, err := t.tx.Exec(`
+		INSERT INTO changesets (id, uid, user) VALUES (?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
+		el.Changeset, el.UID, el.User)
+	return err
+}
+
+// saveHistory writes el directly into elements_history, without touching
+// the live elements row. Used for a version that arrives after a newer one
+// is already live, so it can never become live itself. ON CONFLICT DO
+// NOTHING makes repeating it, e.g. on replay, harmless.
+func (t *Tx) saveHistory(el Element, deleted bool) error {
+	if err := t.upsertChangeset(el); err != nil {
+		return err
+	}
+	tags, err := marshalTags(el.Tags)
+	if err != nil {
+		return err
+	}
+	_, err = t.tx.Exec(`
+		INSERT INTO elements_history
+			(id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags, deleted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id, type, version) DO NOTHING`,
+		el.ID, el.Type, el.Version, el.Lat, el.Lon, el.UID, el.User, ts(el.Timestamp), el.Changeset, tags, deleted)
+	return err
+}
+
+// marshalTags encodes tags as the JSON stored in the tags column, or nil
+// for an untagged element.
+func marshalTags(tags map[string]string) (any, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(tags)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 // Delete moves a live element to elements_history with deleted set. A
