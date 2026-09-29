@@ -1,29 +1,8 @@
-# Which objects to add to the database, uses the osmium-tags-filter syntax.
-select:
-  - "climbing"
-  - "climbing:*"
-  - "sport=*climbing"
-  - "sport=*boulder"
-  - "path=climbing_access"
-  - "leisure=climbing"
+db_path: "../ingest/betawatch.db"
 
 # Address to serve the live web view on (e.g., ":8080").
 # Empty to disable the web view.
 http_addr: ":8080"
-
-# File to keep recent changes.
-# Empty to disable storage.
-store_file: "changes.ndjson"
-
-# File to record the last processed minute.
-# Empty to disable state tracking.
-state_file: "state.json"
-
-# How far back to keep changes (e.g., "168h" for 7 days, "24h", "48h").
-retain_duration: "168h"
-
-# How far back to catch up on first run (e.g., "2h", "6h", "24h").
-backfill_duration: "1h"
 
 # Descriptive labels for a selected object. These never affect selection,
 # and an object can carry several.

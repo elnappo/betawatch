@@ -13,13 +13,36 @@ import (
 //go:embed index.html favicon.svg
 var static embed.FS
 
-// Handler serves the review page, its history and its SSE stream.
-func (b *Broker) Handler() http.Handler {
+// HistoryFetcher returns one page of past changes, newest first, each
+// already encoded as the JSON the browser expects. before is "" for the
+// newest page, or a page's OldestCursor to keep paging into the past.
+// more reports whether older changes remain beyond the page.
+type HistoryFetcher func(before string, limit int) (changes []json.RawMessage, oldestCursor string, more bool, err error)
+
+// PreviousVersion is the version just before the one being viewed, for the
+// inline tag/coordinate diff shown when a row expands. Found is false when
+// there is nothing to diff against: a create (version 1) or a gap in
+// stored history look the same from here, so both just show no diff.
+type PreviousVersion struct {
+	Found bool              `json:"found"`
+	Tags  map[string]string `json:"tags,omitempty"`
+	Lat   *float64          `json:"lat,omitempty"`
+	Lon   *float64          `json:"lon,omitempty"`
+}
+
+// DiffFetcher looks up the version just before the given one.
+type DiffFetcher func(typ string, id int64, version int) (*PreviousVersion, error)
+
+// NewHandler serves the review page, its history, its SSE stream and its
+// per-element diffs. fetch supplies history pages, diff supplies the
+// previous-version lookups, and the broker supplies the live stream.
+func NewHandler(b *Broker, fetch HistoryFetcher, diff DiffFetcher) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", http.FileServerFS(static))
 	mux.Handle("GET /favicon.svg", http.FileServerFS(static))
 	mux.HandleFunc("GET /robots.txt", serveRobots)
-	mux.HandleFunc("GET /api/changes", b.serveHistory)
+	mux.HandleFunc("GET /api/changes", serveHistory(fetch))
+	mux.HandleFunc("GET /api/diff", serveDiff(diff))
 	mux.HandleFunc("GET /events", b.serveEvents)
 	return mux
 }
@@ -32,31 +55,78 @@ func serveRobots(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "User-agent: *\nDisallow: /\n")
 }
 
-// serveHistory returns the changes held in memory, newest first, with
-// the id of the newest event. The page opens its stream from that id, so
-// a change arriving between the two requests is not missed.
-func (b *Broker) serveHistory(w http.ResponseWriter, r *http.Request) {
-	events := b.History()
+const (
+	defaultPageSize = 50
+	maxPageSize     = 1000
+)
 
-	// json.RawMessage keeps each change exactly as published, so this
-	// package never has to know the shape of a change.
-	changes := make([]json.RawMessage, 0, len(events))
-	for i := len(events) - 1; i >= 0; i-- {
-		changes = append(changes, json.RawMessage(events[i].Data))
+// serveHistory returns one page of changes from the database. "limit"
+// sets the page size and "before" is the oldest_cursor of the previous
+// page, so the page can keep scrolling into the past.
+func serveHistory(fetch HistoryFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || limit < 1 {
+			limit = defaultPageSize
+		}
+		limit = min(limit, maxPageSize)
+		before := q.Get("before")
+
+		changes, oldest, more, err := fetch(before, limit)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if changes == nil {
+			changes = []json.RawMessage{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(struct {
+			OldestCursor string            `json:"oldest_cursor,omitempty"`
+			More         bool              `json:"more"`
+			Changes      []json.RawMessage `json:"changes"`
+		}{
+			OldestCursor: oldest,
+			More:         more,
+			Changes:      changes,
+		})
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(struct {
-		LastEventID int64             `json:"last_event_id"`
-		Changes     []json.RawMessage `json:"changes"`
-	}{
-		LastEventID: b.LastID(),
-		Changes:     changes,
-	})
 }
 
-// serveEvents streams changes to one browser as server-sent events.
+// serveDiff returns the version just before the one the browser is asking
+// about, for the inline tag/coordinate diff shown when a row expands.
+func serveDiff(diff DiffFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		typ := q.Get("type")
+		id, idErr := strconv.ParseInt(q.Get("id"), 10, 64)
+		version, versionErr := strconv.Atoi(q.Get("version"))
+		if typ == "" || idErr != nil || versionErr != nil {
+			http.Error(w, "type, id and version are required", http.StatusBadRequest)
+			return
+		}
+
+		prev, err := diff(typ, id, version)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if prev == nil {
+			prev = &PreviousVersion{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(prev)
+	}
+}
+
+// serveEvents streams changes to one browser as server-sent events. The
+// stream is live only: a browser that missed changes while disconnected
+// picks them up by re-fetching /api/changes.
 func (b *Broker) serveEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -71,18 +141,13 @@ func (b *Broker) serveEvents(w http.ResponseWriter, r *http.Request) {
 	// Without this an intermediate proxy may buffer the whole stream.
 	h.Set("X-Accel-Buffering", "no")
 
-	// The browser resends the last id it saw when it reconnects, so a
-	// dropped connection does not lose the changes sent meanwhile.
-	after := lastEventID(r)
-
-	backlog, events, cancel := b.Subscribe(after)
+	events, cancel := b.Subscribe()
 	defer cancel()
 
-	for _, ev := range backlog {
-		if err := writeEvent(w, ev); err != nil {
-			return
-		}
-	}
+	// Send the headers immediately: without a flush here, nothing reaches
+	// the client until the first event or ping, and a client waiting on
+	// the response (rather than just the body) blocks needlessly.
+	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
 	// Keep the connection alive through proxies that time out idle
@@ -111,23 +176,9 @@ func (b *Broker) serveEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// lastEventID reads the id the browser last saw, from the standard
-// header or from the query string used on the first connection.
-func lastEventID(r *http.Request) int64 {
-	raw := r.Header.Get("Last-Event-ID")
-	if raw == "" {
-		raw = r.URL.Query().Get("lastEventId")
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return id
-}
-
 // writeEvent writes one event in SSE wire format. Data is single-line
 // JSON, so it needs no splitting across data: lines.
 func writeEvent(w http.ResponseWriter, ev Event) error {
-	_, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.ID, ev.Data)
+	_, err := fmt.Fprintf(w, "data: %s\n\n", ev.Data)
 	return err
 }

@@ -36,19 +36,14 @@ type Config struct {
 	// Empty to disable.
 	HTTPAddr string `yaml:"http_addr"`
 
-	// StoreFile is the path to the file keeping recent changes.
-	// Empty to disable.
-	StoreFile string `yaml:"store_file"`
-
-	// StateFile is the path to the file recording the last processed minute.
-	// Empty to disable.
-	StateFile string `yaml:"state_file"`
-
-	// RetainDuration is how far back to keep changes.
-	RetainDuration time.Duration `yaml:"retain_duration"`
-
 	// BackfillDuration is how far back to catch up on first run.
 	BackfillDuration time.Duration `yaml:"backfill_duration"`
+
+	// DbPath is the path to the SQLite database.
+	DbPath string `yaml:"db_path"`
+
+	// IngestStatePath is the path to the file recording the last processed minute for ingest.
+	IngestStatePath string `yaml:"ingest_state_path"`
 
 	version       string
 	selectExprs   Exprs
@@ -64,8 +59,18 @@ func Load(path string) (*Config, error) {
 	}
 	c := &Config{
 		// Set defaults
-		RetainDuration:   7 * 24 * time.Hour,
+		Select: []string{
+			"climbing",
+			"climbing:*",
+			"sport=*climbing",
+			"sport=*boulder",
+			"path=climbing_access",
+			"leisure=climbing",
+		},
+		HTTPAddr:         ":8080",
 		BackfillDuration: 1 * time.Hour,
+		DbPath:           "./betawatch.db",
+		IngestStatePath:  "ingest-state.json",
 	}
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

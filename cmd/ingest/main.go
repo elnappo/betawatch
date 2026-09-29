@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	ingest [-config config.yaml] [-db betawatch.db] [-state ingest-state.json] [-backfill 2h]
+//	ingest [-config config.yaml]
 package main
 
 import (
@@ -30,28 +30,25 @@ import (
 const pollInterval = 30 * time.Second
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "tag filter config")
-	dbPath := flag.String("db", "./betawatch.db", "SQLite database")
-	// Not the state file of betawatch: the two commands would overwrite
-	// each other's cursor.
-	statePath := flag.String("state", "ingest-state.json", "file recording the last processed minute")
-	backfill := flag.Duration("backfill", 2*time.Hour, "how far to catch up on a first run")
+	configPath := flag.String("config", "config.yaml", "Specify config file path")
 	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if err := run(ctx, *configPath, *dbPath, *statePath, *backfill); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, cfg, cfg.DbPath, cfg.IngestStatePath, cfg.BackfillDuration); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, configPath, dbPath, statePath string, backfill time.Duration) error {
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
+func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, backfill time.Duration) error {
 	db, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)

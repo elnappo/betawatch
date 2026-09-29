@@ -63,7 +63,7 @@ func realConfig(t *testing.T) *Config {
 // TestRepoConfigLoads checks the shipped config.yaml is valid, without
 // asserting anything about which tags it selects.
 func TestRepoConfigLoads(t *testing.T) {
-	if _, err := Load(filepath.Join("..", "..", "config.yaml")); err != nil {
+	if _, err := Load(filepath.Join("..", "..", "cmd", "feed", "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -164,7 +164,9 @@ func TestVersionChangesWithContent(t *testing.T) {
 
 func TestLoadErrors(t *testing.T) {
 	tests := map[string]string{
-		"no select":      "classify:\n  route: [climbing=route]\n",
+		// A missing select falls back to the defaults, so only an
+		// explicitly empty one is an error.
+		"empty select":   "select: []\n",
 		"bad expression": "select: [\"=nokey\"]\n",
 		"bad classify":   "select: [climbing]\nclassify:\n  route: [\"\"]\n",
 		"not yaml":       "select: [climbing\n",
@@ -343,7 +345,7 @@ func TestBadRegexFailsToLoad(t *testing.T) {
 // The config the command actually ships must load and its patterns must
 // compile.
 func TestShippedConfigRegexesCompile(t *testing.T) {
-	c, err := Load(filepath.Join("..", "..", "cmd", "changes", "config.yaml"))
+	c, err := Load(filepath.Join("..", "..", "cmd", "feed", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,21 +104,55 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestChangesetKeepsEarliestTimestamp(t *testing.T) {
+func TestChangesetTimestampStaysNull(t *testing.T) {
+	// The diffs never carry the changeset itself, so nothing should ever
+	// derive a changeset timestamp from an element's.
 	s := open(t)
-	early := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	apply(t, s, func(tx *Tx) {
-		second := el(1, early.Add(time.Hour))
-		second.ID = 2
-		must(t, tx.Save(second))
-		must(t, tx.Save(el(1, early)))
+		must(t, tx.Save(el(1, time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC))))
 	})
-	var got string
+	var got sql.NullString
 	if err := s.db.QueryRow(`SELECT timestamp FROM changesets WHERE id = 100`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	if want := early.Format(time.RFC3339); got != want {
-		t.Errorf("changeset timestamp = %s, want %s", got, want)
+	if got.Valid {
+		t.Errorf("changeset timestamp = %q, want NULL", got.String)
+	}
+}
+
+func TestPreviousVersion(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		must(t, tx.Save(el(2, now.Add(time.Minute))))
+	})
+
+	prev, err := s.PreviousVersion(1, Node, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev == nil {
+		t.Fatal("PreviousVersion = nil, want version 1")
+	}
+	if prev.Version != 1 {
+		t.Errorf("Version = %d, want 1", prev.Version)
+	}
+	if prev.Lat == nil || prev.Lon == nil {
+		t.Error("Lat/Lon not read from history")
+	}
+}
+
+func TestPreviousVersionOfACreate(t *testing.T) {
+	s := open(t)
+	apply(t, s, func(tx *Tx) { must(t, tx.Save(el(1, time.Now()))) })
+
+	prev, err := s.PreviousVersion(1, Node, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev != nil {
+		t.Errorf("PreviousVersion of version 1 = %+v, want nil", prev)
 	}
 }
 

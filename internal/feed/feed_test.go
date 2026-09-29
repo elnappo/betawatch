@@ -2,6 +2,7 @@ package feed
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +11,19 @@ import (
 	"time"
 )
 
+// noHistory is a HistoryFetcher for tests that do not exercise /api/changes.
+func noHistory(before string, limit int) ([]json.RawMessage, string, bool, error) {
+	return nil, "", false, nil
+}
+
+// noDiff is a DiffFetcher for tests that do not exercise /api/diff.
+func noDiff(typ string, id int64, version int) (*PreviousVersion, error) {
+	return nil, nil
+}
+
 func TestPublishReachesSubscriber(t *testing.T) {
-	b := New(10)
-	_, events, cancel := b.Subscribe(0)
+	b := New()
+	events, cancel := b.Subscribe()
 	defer cancel()
 
 	b.Publish([]byte(`{"a":1}`))
@@ -30,53 +41,27 @@ func TestPublishReachesSubscriber(t *testing.T) {
 	}
 }
 
-func TestSubscribeReplaysBacklog(t *testing.T) {
-	b := New(10)
+func TestSubscribeOnlySeesLaterEvents(t *testing.T) {
+	b := New()
 	b.Publish([]byte("one"))
+
+	events, cancel := b.Subscribe()
+	defer cancel()
 	b.Publish([]byte("two"))
 
-	backlog, _, cancel := b.Subscribe(0)
-	defer cancel()
-	if len(backlog) != 2 {
-		t.Fatalf("backlog = %d events, want 2", len(backlog))
-	}
-}
-
-func TestSubscribeResumesAfterID(t *testing.T) {
-	b := New(10)
-	b.Publish([]byte("one"))
-	b.Publish([]byte("two"))
-	b.Publish([]byte("three"))
-
-	// A browser that already saw event 1 must get only 2 and 3.
-	backlog, _, cancel := b.Subscribe(1)
-	defer cancel()
-	if len(backlog) != 2 {
-		t.Fatalf("backlog = %d events, want 2", len(backlog))
-	}
-	if string(backlog[0].Data) != "two" {
-		t.Errorf("first replayed = %q, want \"two\"", backlog[0].Data)
-	}
-}
-
-func TestHistoryIsBounded(t *testing.T) {
-	b := New(3)
-	for range 10 {
-		b.Publish([]byte("x"))
-	}
-	backlog, _, cancel := b.Subscribe(0)
-	defer cancel()
-	if len(backlog) != 3 {
-		t.Errorf("backlog = %d events, want 3", len(backlog))
-	}
-	if b.LastID() != 10 {
-		t.Errorf("LastID = %d, want 10", b.LastID())
+	select {
+	case ev := <-events:
+		if string(ev.Data) != "two" {
+			t.Errorf("got %q, want \"two\"", ev.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event delivered")
 	}
 }
 
 func TestCancelUnsubscribes(t *testing.T) {
-	b := New(10)
-	_, events, cancel := b.Subscribe(0)
+	b := New()
+	events, cancel := b.Subscribe()
 	cancel()
 
 	if _, open := <-events; open {
@@ -87,15 +72,15 @@ func TestCancelUnsubscribes(t *testing.T) {
 }
 
 func TestCancelIsIdempotent(t *testing.T) {
-	b := New(10)
-	_, _, cancel := b.Subscribe(0)
+	b := New()
+	_, cancel := b.Subscribe()
 	cancel()
 	cancel() // must not panic by closing twice
 }
 
 func TestSlowSubscriberIsDropped(t *testing.T) {
-	b := New(1000)
-	_, events, cancel := b.Subscribe(0)
+	b := New()
+	events, cancel := b.Subscribe()
 	defer cancel()
 
 	// Overrun the 64-slot buffer without reading.
@@ -108,10 +93,8 @@ func TestSlowSubscriberIsDropped(t *testing.T) {
 }
 
 func TestServeEventsStreamsSSE(t *testing.T) {
-	b := New(10)
-	b.Publish([]byte(`{"id":1}`))
-
-	srv := httptest.NewServer(b.Handler())
+	b := New()
+	srv := httptest.NewServer(NewHandler(b, noHistory, noDiff))
 	defer srv.Close()
 
 	req, err := http.NewRequest("GET", srv.URL+"/events", nil)
@@ -129,45 +112,138 @@ func TestServeEventsStreamsSSE(t *testing.T) {
 	}
 
 	r := bufio.NewReader(resp.Body)
-	id, _ := r.ReadString('\n')
+	// Give the subscription time to register before publishing.
+	time.Sleep(50 * time.Millisecond)
+	b.Publish([]byte(`{"id":1}`))
+
 	data, _ := r.ReadString('\n')
-	if strings.TrimSpace(id) != "id: 1" {
-		t.Errorf("first line = %q, want \"id: 1\"", strings.TrimSpace(id))
-	}
 	if strings.TrimSpace(data) != `data: {"id":1}` {
-		t.Errorf("second line = %q", strings.TrimSpace(data))
+		t.Errorf("line = %q", strings.TrimSpace(data))
 	}
 }
 
-func TestServeEventsHonoursLastEventID(t *testing.T) {
-	b := New(10)
-	b.Publish([]byte(`{"n":1}`))
-	b.Publish([]byte(`{"n":2}`))
+func TestServeHistoryReturnsFetchedChanges(t *testing.T) {
+	fetch := func(before string, limit int) ([]json.RawMessage, string, bool, error) {
+		if before != "" {
+			t.Errorf("before = %q, want empty", before)
+		}
+		if limit != defaultPageSize {
+			t.Errorf("limit = %d, want %d", limit, defaultPageSize)
+		}
+		return []json.RawMessage{json.RawMessage(`{"id":1}`)}, "cursor-1", true, nil
+	}
 
-	srv := httptest.NewServer(b.Handler())
+	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff))
 	defer srv.Close()
 
-	req, err := http.NewRequest("GET", srv.URL+"/events", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Last-Event-ID", "1")
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.Get(srv.URL + "/api/changes")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	r := bufio.NewReader(resp.Body)
-	id, _ := r.ReadString('\n')
-	if strings.TrimSpace(id) != "id: 2" {
-		t.Errorf("resumed at %q, want \"id: 2\"", strings.TrimSpace(id))
+	var body struct {
+		OldestCursor string            `json:"oldest_cursor"`
+		More         bool              `json:"more"`
+		Changes      []json.RawMessage `json:"changes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Changes) != 1 || string(body.Changes[0]) != `{"id":1}` {
+		t.Errorf("changes = %v", body.Changes)
+	}
+	if body.OldestCursor != "cursor-1" || !body.More {
+		t.Errorf("oldest_cursor = %q, more = %v", body.OldestCursor, body.More)
+	}
+}
+
+func TestServeHistoryPassesBeforeAndLimit(t *testing.T) {
+	fetch := func(before string, limit int) ([]json.RawMessage, string, bool, error) {
+		if before != "cursor-1" {
+			t.Errorf("before = %q, want cursor-1", before)
+		}
+		if limit != 5 {
+			t.Errorf("limit = %d, want 5", limit)
+		}
+		return nil, "", false, nil
+	}
+
+	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/changes?before=cursor-1&limit=5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestServeDiffReturnsPreviousVersion(t *testing.T) {
+	lat, lon := 47.5, 11.2
+	diff := func(typ string, id int64, version int) (*PreviousVersion, error) {
+		if typ != "way" || id != 42 || version != 3 {
+			t.Errorf("diff(%q, %d, %d), want (way, 42, 3)", typ, id, version)
+		}
+		return &PreviousVersion{Found: true, Tags: map[string]string{"sport": "climbing"}, Lat: &lat, Lon: &lon}, nil
+	}
+
+	srv := httptest.NewServer(NewHandler(New(), noHistory, diff))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42&version=3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var got PreviousVersion
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Found || got.Tags["sport"] != "climbing" || *got.Lat != lat || *got.Lon != lon {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestServeDiffReportsNotFound(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42&version=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var got PreviousVersion
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Found {
+		t.Errorf("Found = true, want false")
+	}
+}
+
+func TestServeDiffRejectsMissingParams(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
 func TestServesIndexPage(t *testing.T) {
-	srv := httptest.NewServer(New(10).Handler())
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -186,7 +262,7 @@ func TestServesIndexPage(t *testing.T) {
 }
 
 func TestServesRobotsTxt(t *testing.T) {
-	srv := httptest.NewServer(New(10).Handler())
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/robots.txt")
@@ -211,7 +287,7 @@ func TestServesRobotsTxt(t *testing.T) {
 }
 
 func TestServesFavicon(t *testing.T) {
-	srv := httptest.NewServer(New(10).Handler())
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/favicon.svg")
@@ -236,7 +312,7 @@ func TestServesFavicon(t *testing.T) {
 }
 
 func TestPageLinksTheFavicon(t *testing.T) {
-	srv := httptest.NewServer(New(10).Handler())
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")

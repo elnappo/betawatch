@@ -7,7 +7,7 @@ elements selected by `config.yaml` in SQLite, with version history.
 ## Decisions
 - Command name: `ingest`, in `cmd/ingest/main.go`.
 - Filter: the `select` expressions of `config.yaml` (osmium tags-filter
-  syntax), via `internal/config`, the same as `cmd/betawatch`.
+  syntax), via `internal/config`, the same as `cmd/feed`.
 - Minute diffs come from `github.com/paulmach/osm/replication`.
 - SQLite driver: `modernc.org/sqlite` (pure Go, no cgo).
 - `elements` holds the latest version only; `elements_history` holds
@@ -99,14 +99,10 @@ Primary key `(id, type, version)`.
 5. Save the minute to the state file only after the transaction commits.
 
 ## Flags
-- `-config`: filter config (default `config.yaml`)
-- `-db`: SQLite file (default `./betawatch.db`)
-- `-state`: state file (default `ingest-state.json`; separate from
-  betawatch's, so the two commands do not overwrite each other's cursor)
-- `-backfill`: how far to catch up on a first run (default `2h`)
+- `-config`: filter config and ingest settings (default `config.yaml`)
 
 ## Resume
-Same pattern as `cmd/betawatch`: `feed.State` records the last processed
+Same pattern as `cmd/feed`: `feed.State` records the last processed
 minute, and `firstMissing` picks where to start. Resume from the state
 file, not from the database, since most minutes hold no match.
 

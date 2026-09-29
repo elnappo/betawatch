@@ -60,7 +60,7 @@ node of a route or a member dropped from a crag relation.
 
 **Derived fields must be recomputed on load.** `classes`, `matched_keys`
 and `unwanted` come from the config but are written into each stored
-record. `reclassify` in `cmd/betawatch/main.go` recomputes them when the
+record. `reclassify` in `cmd/feed/main.go` recomputes them when the
 store is read, so editing the config applies to changes already stored.
 Anything else derived from the config belongs there too.
 

@@ -273,6 +273,29 @@
             color: var(--warn-edge);
         }
 
+        /* Lazy-loaded diff against the previous version, only shown once
+           loaded and only for a modify (version > 1). */
+        table.tags tr.diff-added > td {
+            background: color-mix(in srgb, var(--accent) 14%, transparent);
+        }
+
+        table.tags tr.diff-removed > td {
+            background: color-mix(in srgb, #d14 10%, transparent);
+        }
+
+        table.tags .old-value {
+            text-decoration: line-through;
+            color: var(--muted);
+            margin-right: 6px;
+        }
+
+        .diff-note {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 12.5px;
+            font-style: italic;
+        }
+
         /* The pattern the value should have matched. */
         table.tags .why {
             margin-left: 8px;
@@ -377,6 +400,13 @@
             padding: 24px 10px;
         }
 
+        #end {
+            padding: 14px 10px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
         footer {
             display: flex;
             flex-wrap: wrap;
@@ -429,6 +459,7 @@
         <tbody id="rows"></tbody>
     </table>
 </div>
+<div id="end"></div>
 <div id="empty">No changes yet — waiting for the next one…</div>
 
 <footer>
@@ -457,13 +488,19 @@
     const statusEl = document.getElementById('status');
     const countEl = document.getElementById('count');
     const emptyEl = document.getElementById('empty');
+    const endEl = document.getElementById('end');
 
     // How many changes the table holds before dropping the oldest.
     const maxRows = 500;
 
     let total = 0;
-    // Remembered so a reconnect resumes rather than replaying everything.
-    let lastId = 0;
+
+    // Paging into the past. oldestCursor is "" until the first page loads,
+    // then the cursor of the oldest row on the page; hasMore stops the
+    // observer once the server reports no more history.
+    let oldestCursor = '';
+    let hasMore = true;
+    let loadingOlder = false;
 
     // ago renders how long ago a change was made. Rows span a week, and a
     // gap of minutes reads more clearly than a wall clock time.
@@ -618,8 +655,12 @@
         const bad = new Map((c.bad_values || []).map(b => [b.key, b.regex]));
         const tags = c.tags || {};
         const keys = Object.keys(tags).sort();
+        // Rows keyed by tag, so a lazy-loaded diff can add the old value
+        // next to the current one without rebuilding the table.
+        const valueCells = new Map();
+        let table = null;
         if (keys.length) {
-            const table = document.createElement('table');
+            table = document.createElement('table');
             table.className = 'tags';
             for (const k of keys) {
                 const tr = table.insertRow();
@@ -642,6 +683,7 @@
                     why.textContent = 'want ' + bad.get(k);
                     vt.append(why);
                 }
+                valueCells.set(k, {tr, vt});
             }
             top.append(table);
         }
@@ -681,11 +723,84 @@
         box.append(meta);
 
         td.append(box);
+
+        // applyDiff renders the previous version, once fetched, into the
+        // existing tag table: changed values get the old one struck through
+        // next to the new, added/removed keys get their own row and colour.
+        function applyDiff(prev) {
+            if (!prev.found) {
+                const note = document.createElement('div');
+                note.className = 'diff-note';
+                note.textContent = 'no previous version stored';
+                box.insertBefore(note, meta);
+                return;
+            }
+
+            const prevTags = prev.tags || {};
+            for (const k of new Set([...Object.keys(tags), ...Object.keys(prevTags)])) {
+                const oldVal = prevTags[k];
+                const newVal = tags[k];
+                if (oldVal === newVal) continue;
+
+                if (newVal === undefined) {
+                    // Present before, gone now: shown as its own row, since the
+                    // current tag table has no row left to attach it to.
+                    if (!table) {
+                        table = document.createElement('table');
+                        table.className = 'tags';
+                        top.prepend(table);
+                    }
+                    const tr = table.insertRow();
+                    tr.className = 'diff-removed';
+                    tr.insertCell().textContent = k;
+                    const vt = tr.insertCell();
+                    const old = document.createElement('span');
+                    old.className = 'old-value';
+                    old.textContent = oldVal;
+                    vt.append(old);
+                } else if (oldVal === undefined) {
+                    const entry = valueCells.get(k);
+                    if (entry) entry.tr.classList.add('diff-added');
+                } else {
+                    const entry = valueCells.get(k);
+                    if (entry) {
+                        const old = document.createElement('span');
+                        old.className = 'old-value';
+                        old.textContent = oldVal;
+                        entry.vt.prepend(old);
+                    }
+                }
+            }
+
+            if (prev.lat != null && prev.lon != null && (prev.lat !== c.lat || prev.lon !== c.lon)) {
+                const was = prev.lat.toFixed(6) + ', ' + prev.lon.toFixed(6);
+                const now = (c.lat != null && c.lon != null) ? c.lat.toFixed(6) + ', ' + c.lon.toFixed(6) : '—';
+                meta.insertAdjacentElement('afterbegin', field('moved', was + ' → ' + now));
+            }
+        }
+
+        let diffState = 'unloaded'; // unloaded, loading, loaded
+        row._loadDiff = async function () {
+            // Version 1 is a create: there is nothing to diff it against.
+            if (c.version <= 1 || diffState !== 'unloaded') return;
+            diffState = 'loading';
+            try {
+                const url = 'api/diff?type=' + encodeURIComponent(c.type) +
+                    '&id=' + c.id + '&version=' + c.version;
+                const res = await fetch(url);
+                applyDiff(await res.json());
+                diffState = 'loaded';
+            } catch (err) {
+                console.error('diff', err);
+                diffState = 'unloaded'; // allow retrying on the next expand
+            }
+        };
+
         return row;
     }
 
-    function addRow(c, isNew = true) {
-        const row = rows.insertRow(0);
+    function addRow(c, isNew = true, atEnd = false) {
+        const row = atEnd ? rows.insertRow() : rows.insertRow(0);
         // An unwanted tag is worth a look, so the row is tinted.
         const flagged = (c.unwanted && c.unwanted.length) ||
             (c.bad_values && c.bad_values.length);
@@ -745,6 +860,7 @@
             detail.hidden = !detail.hidden;
             row.classList.toggle('open', !detail.hidden);
             row.cells[0].textContent = detail.hidden ? '▸' : '▾';
+            if (!detail.hidden) detail._loadDiff();
         });
 
         total++;
@@ -752,10 +868,15 @@
         emptyEl.hidden = true;
 
         // Keep the page bounded on a long-running session. Each change is a
-        // main row plus its detail row, so the limit counts pairs.
-        while (rows.rows.length > 2 * maxRows) {
-            rows.deleteRow(rows.rows.length - 1); // detail
-            rows.deleteRow(rows.rows.length - 1); // its main row
+        // main row plus its detail row, so the limit counts pairs. Rows
+        // loaded by scrolling into the past are appended at the end, so
+        // trimming there would delete what was just added — only new live
+        // rows, which arrive at the top, are trimmed from the bottom.
+        if (!atEnd) {
+            while (rows.rows.length > 2 * maxRows) {
+                rows.deleteRow(rows.rows.length - 1); // detail
+                rows.deleteRow(rows.rows.length - 1); // its main row
+            }
         }
     }
 
@@ -770,10 +891,7 @@
     setInterval(refreshTimes, 30000);
 
     function connect() {
-        // EventSource resends Last-Event-ID itself on an automatic retry; the
-        // query parameter covers the first connection, which resumes from
-        // whatever the history call already showed.
-        const es = new EventSource('events?lastEventId=' + lastId);
+        const es = new EventSource('events');
 
         es.onopen = () => {
             statusEl.textContent = 'live';
@@ -781,7 +899,6 @@
         };
 
         es.onmessage = e => {
-            if (e.lastEventId) lastId = Number(e.lastEventId);
             try {
                 addRow(JSON.parse(e.data));
             } catch (err) {
@@ -796,20 +913,45 @@
         };
     }
 
-    // Load the past changes first, then stream from where they end. The
-    // history response carries its own last event id, so a change arriving
-    // between the two requests is replayed rather than lost.
-    async function start() {
-        statusEl.textContent = 'loading history…';
+    // loadOlder fetches the next page before oldestCursor and appends it at
+    // the bottom. Called both for the first page (cursor "") and for every
+    // page the scroll observer asks for after that.
+    async function loadOlder() {
+        if (loadingOlder || !hasMore) return;
+        loadingOlder = true;
+        endEl.textContent = 'loading…';
         try {
-            const res = await fetch('api/changes');
-            const {last_event_id, changes} = await res.json();
-            // changes is newest first, so add oldest first to keep that order.
-            for (let i = changes.length - 1; i >= 0; i--) addRow(changes[i], false);
-            lastId = last_event_id || 0;
+            const url = 'api/changes' + (oldestCursor ? '?before=' + encodeURIComponent(oldestCursor) : '');
+            const res = await fetch(url);
+            const {changes, oldest_cursor, more} = await res.json();
+            for (const c of changes) addRow(c, false, true);
+            oldestCursor = oldest_cursor || oldestCursor;
+            hasMore = more;
+            endEl.textContent = hasMore ? '' : 'start of history';
         } catch (err) {
             console.error('history', err);
+            endEl.textContent = '';
+        } finally {
+            loadingOlder = false;
         }
+        // A page shorter than the viewport leaves the sentinel visible, and
+        // the observer only fires on a change in intersection — so without
+        // this check a tall screen would stop loading after one page.
+        if (hasMore && endEl.getBoundingClientRect().top < innerHeight) loadOlder();
+    }
+
+    // Load older pages as the sentinel div at the bottom of the table comes
+    // into view, rather than on a scroll listener.
+    new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) loadOlder();
+    }).observe(endEl);
+
+    // Load the newest page first, then stream new ones as they arrive. A
+    // change published between the two is possible but rare enough (about
+    // 200 a day, worldwide) not to be worth reconciling.
+    async function start() {
+        statusEl.textContent = 'loading history…';
+        await loadOlder();
         connect();
     }
 

@@ -1,10 +1,10 @@
 -- Requires PRAGMA foreign_keys = ON on every connection.
 
--- Only id, timestamp, uid and user are filled from the minute diffs. The
--- other columns are NULL until a metadata source is added.
+-- Only id, uid and user are filled from the minute diffs. The other
+-- columns, including timestamp, are NULL until a metadata source is added.
 CREATE TABLE IF NOT EXISTS changesets (
     id BIGINT PRIMARY KEY,
-    timestamp DATETIME NOT NULL, -- earliest element timestamp seen for it
+    timestamp DATETIME,
     uid BIGINT,
     user TEXT,
     comment TEXT,

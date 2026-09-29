@@ -116,12 +116,13 @@ func (t *Tx) Save(el Element) error {
 		tags = string(b)
 	}
 
-	// The changeset's timestamp is the earliest element timestamp seen,
-	// because the diffs do not carry the changeset itself.
+	// The diffs do not carry the changeset itself, only which elements
+	// belong to it, so timestamp and the other changeset columns stay NULL
+	// until a metadata source is added.
 	if _, err := t.tx.Exec(`
-		INSERT INTO changesets (id, timestamp, uid, user) VALUES (?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET timestamp = min(timestamp, excluded.timestamp)`,
-		el.Changeset, ts(el.Timestamp), el.UID, el.User); err != nil {
+		INSERT INTO changesets (id, uid, user) VALUES (?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
+		el.Changeset, el.UID, el.User); err != nil {
 		return err
 	}
 
@@ -165,4 +166,100 @@ func (t *Tx) retire(id int64, typ string, deleted bool) error {
 // ts formats a time so that text order is time order.
 func ts(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
+}
+
+// RecentChange is an element record with metadata from the database.
+type RecentChange struct {
+	ID        int64
+	Type      string
+	Version   int
+	Lat, Lon  *float64 // nodes only
+	Timestamp time.Time
+	User      string
+	UID       int64
+	Changeset int64
+	Tags      map[string]string
+	Name      string
+}
+
+// QueryRecent returns all live elements modified since the given timestamp,
+// ordered by timestamp ascending.
+func (s *Store) QueryRecent(since time.Time) ([]RecentChange, error) {
+	return scanChanges(s.db.Query(`
+		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
+		FROM elements
+		WHERE timestamp > ?
+		ORDER BY timestamp ASC
+	`, ts(since)))
+}
+
+// QueryLatest returns the most recently modified live elements, newest
+// first, up to limit. The (id, type) tiebreak matches QueryBefore's, so
+// paging from this page into the next never skips or repeats a row that
+// shares a timestamp with the page boundary.
+func (s *Store) QueryLatest(limit int) ([]RecentChange, error) {
+	return scanChanges(s.db.Query(`
+		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
+		FROM elements
+		ORDER BY timestamp DESC, id DESC, type DESC
+		LIMIT ?
+	`, limit))
+}
+
+// QueryBefore returns live elements ordered before the given (timestamp,
+// id, type), newest first, up to limit. It is how the web view pages into
+// the past. The full triple is needed, not just the timestamp: many
+// elements share a timestamp (a single backfill batch commonly holds
+// dozens), so cutting off on timestamp alone would drop the rest of that
+// group whenever a page boundary landed inside it.
+func (s *Store) QueryBefore(before time.Time, id int64, typ string, limit int) ([]RecentChange, error) {
+	return scanChanges(s.db.Query(`
+		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
+		FROM elements
+		WHERE (timestamp, id, type) < (?, ?, ?)
+		ORDER BY timestamp DESC, id DESC, type DESC
+		LIMIT ?
+	`, ts(before), id, typ, limit))
+}
+
+// PreviousVersion returns the version just before version for an element,
+// read from elements_history, or nil if there is none: version is 1 (a
+// create has nothing before it) or the history has a gap.
+func (s *Store) PreviousVersion(id int64, typ string, version int) (*RecentChange, error) {
+	changes, err := scanChanges(s.db.Query(`
+		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
+		FROM elements_history
+		WHERE id = ? AND type = ? AND version = ?
+	`, id, typ, version-1))
+	if err != nil || len(changes) == 0 {
+		return nil, err
+	}
+	return &changes[0], nil
+}
+
+// scanChanges reads the rows of a query selecting the columns QueryRecent,
+// QueryLatest, QueryBefore and PreviousVersion all share.
+func scanChanges(rows *sql.Rows, err error) ([]RecentChange, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var changes []RecentChange
+	for rows.Next() {
+		var c RecentChange
+		var tagsJSON *string
+		if err := rows.Scan(&c.ID, &c.Type, &c.Version, &c.Lat, &c.Lon, &c.Timestamp, &c.User, &c.UID, &c.Changeset, &tagsJSON); err != nil {
+			return nil, err
+		}
+		c.Tags = make(map[string]string)
+		if tagsJSON != nil {
+			if err := json.Unmarshal([]byte(*tagsJSON), &c.Tags); err != nil {
+				return nil, fmt.Errorf("unmarshaling tags: %w", err)
+			}
+		}
+		c.Name = c.Tags["name"]
+		changes = append(changes, c)
+	}
+	return changes, rows.Err()
 }

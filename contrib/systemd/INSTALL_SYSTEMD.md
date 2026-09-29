@@ -13,7 +13,7 @@ This guide explains how to install and run BetaWatch as a systemd service.
 ### 1. Build the Binary
 
 ```bash
-cd cmd/betawatch
+cd cmd/feed
 go build -o betawatch
 ```
 
@@ -52,7 +52,7 @@ sudo nano /etc/betawatch/config.yaml
 ### 4. Install Binary
 
 ```bash
-sudo cp cmd/betawatch/betawatch /usr/local/bin/betawatch
+sudo cp cmd/feed/betawatch /usr/local/bin/betawatch
 sudo chmod 755 /usr/local/bin/betawatch
 ```
 
@@ -142,13 +142,6 @@ Common issues:
 - Config file not readable: Check file permissions
 - Port already in use: Change `http_addr` in config
 - State directory not writable: Check `/var/lib/betawatch` permissions
-
-### High memory usage
-
-Adjust `retain_duration` in config to keep fewer changes:
-```yaml
-retain_duration: "72h"  # Keep 3 days instead of 7
-```
 
 ### Slow startup
 
