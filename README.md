@@ -5,11 +5,10 @@ A live view for climbing-related changes on OpenStreetMap (OSM). BetaWatch watch
 ## How to Run
 
 ```bash
-cd cmd/feed
-go run . -config config.yaml
+go run ./cmd/feed -config config.yaml
 ```
 
-This watches for new climbing-related changes from OSM and starts the web view (if configured).
+`betawatch-feed` starts a web server on `localhost:8080` with a live view of climbing-related changes.
 
 ### Ingest into SQLite
 
@@ -17,24 +16,20 @@ This watches for new climbing-related changes from OSM and starts the web view (
 go run ./cmd/ingest -config config.yaml
 ```
 
-`ingest` follows the same minute diffs and stores the elements matched by
-`select` in SQLite: the live version in `elements`, replaced versions in
-`elements_history`, and the changeset each came from in `changesets`. A
-delete of a stored element moves it to `elements_history` with `deleted`
-set. Configuration is done via `config.yaml` with the `-config` flag. The schema is in
-`internal/store/schema.sql`.
+`betawatch-ingest` follows the minute diffs and stores the climbing related elements in SQLite. The
+schema is in `internal/store/schema.sql`.
 
-### Configuration
+### Importing a planet PBF file
 
-The application is configured entirely through `config.yaml`. Key settings include:
+```bash
+go run ./cmd/ingest -config config.yaml -import-pbf climbing.osm.pbf
+```
 
-**Web and Storage:**
-- `http_addr` — Address to serve the live web view on (e.g., `:8080`, empty to disable)
-- `state_file` — File recording the last processed minute (e.g., `state.json`, empty to disable)
-- `backfill_duration` — How far back to catch up on first run (e.g., `2h`)
-
-**Climbing Tags:**
-- `select` — Which OSM objects to track (climbing routes, crags, areas, etc.)
-- `classify` — Labels for different types of climbing locations (route, crag, gym, etc.)
-- `unwanted_tags` — Tags to we don't want on climbing objects.
-- `tag_values_regex` — Validation patterns for tag values
+Imports a planet PBF file into the database and exits, instead of
+following the minute diffs. The file is expected to already be filtered to
+climbing-related elements (e.g. with `osmium tags-filter`), so every
+element in it is stored unconditionally, without consulting `select`. As
+with the minute diffs, an element version already stored is never
+overwritten by an older one. The import commits periodically, so a rerun
+after a crash or interruption is cheap: only the elements committed since
+the last save reprocess.
