@@ -11,6 +11,20 @@ go run . -config config.yaml
 
 This watches for new climbing-related changes from OSM and starts the web view (if configured).
 
+### Ingest into SQLite
+
+```bash
+go run ./cmd/ingest -config cmd/betawatch/config.yaml -db betawatch.db
+```
+
+`ingest` follows the same minute diffs and stores the elements matched by
+`select` in SQLite: the live version in `elements`, replaced versions in
+`elements_history`, and the changeset each came from in `changesets`. A
+delete of a stored element moves it to `elements_history` with `deleted`
+set. Flags: `-config`, `-db` (default `./betawatch.db`), `-state` (default
+`ingest-state.json`) and `-backfill` (default `2h`). The schema is in
+`internal/store/schema.sql`.
+
 ### Configuration
 
 The application is configured entirely through `config.yaml`. Key settings include:
