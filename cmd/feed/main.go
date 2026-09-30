@@ -253,9 +253,13 @@ func stringToType(t string) string {
 func changeFromDB(cfg *config.Config, dbChange store.RecentChange) change {
 	elemType := typeToString(dbChange.Type)
 
+	action := "modify"
+	if dbChange.Version == 1 {
+		action = "create"
+	}
+
 	return change{
-		Minute:       0,        // Not available from database
-		Action:       "modify", // All database reads are current state (not tracking historical action)
+		Action:       action,
 		Type:         elemType,
 		ID:           dbChange.ID,
 		Version:      dbChange.Version,
@@ -292,7 +296,6 @@ func typeToString(t string) string {
 
 // change is one matching element, as printed.
 type change struct {
-	Minute uint64 `json:"minute"` // replication sequence it came from
 	Action string `json:"action"` // create, modify, delete
 	Type   string `json:"type"`   // node, way, relation
 	ID     int64  `json:"id"`
