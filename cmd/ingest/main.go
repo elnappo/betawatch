@@ -257,7 +257,7 @@ func apply(tx *store.Tx, cfg *config.Config, ch *osm.Change) (saved, deleted int
 		// match by id and type against what is stored.
 		for _, el := range ch.Delete.Elements() {
 			e := toElement(el)
-			ok, err := tx.Delete(e.ID, e.Type, e.Version)
+			ok, err := tx.Delete(e)
 			if err != nil {
 				return saved, deleted, err
 			}

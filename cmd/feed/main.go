@@ -154,30 +154,36 @@ func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.His
 	return nil
 }
 
-// encodeHistoryCursor and decodeHistoryCursor pack a row's (timestamp,
-// id, type) into the "before" paging cursor, matching the tiebreak
+// encodeHistoryCursor and decodeHistoryCursor pack a row's (timestamp, id,
+// type, version) into the "before" paging cursor, matching the tiebreak
 // QueryBefore orders and cuts off on. A single backfill batch commonly
-// stores dozens of elements at the same timestamp, so a cursor built
-// from the timestamp alone would drop the rest of that group whenever a
-// page boundary landed inside it.
+// stores dozens of elements at the same timestamp, and the same (id, type)
+// can appear at more than one version since the feed started reading
+// elements_history, so a cursor built from less than the full tuple would
+// drop or repeat rows whenever a page boundary landed inside such a group.
 func encodeHistoryCursor(c store.RecentChange) string {
-	return c.Timestamp.UTC().Format(time.RFC3339) + "|" + c.Type + "|" + strconv.FormatInt(c.ID, 10)
+	return c.Timestamp.UTC().Format(time.RFC3339) + "|" + c.Type + "|" +
+		strconv.FormatInt(c.ID, 10) + "|" + strconv.Itoa(c.Version)
 }
 
-func decodeHistoryCursor(cursor string) (t time.Time, id int64, typ string, err error) {
-	parts := strings.SplitN(cursor, "|", 3)
-	if len(parts) != 3 {
-		return time.Time{}, 0, "", fmt.Errorf("malformed cursor: %q", cursor)
+func decodeHistoryCursor(cursor string) (t time.Time, id int64, typ string, version int, err error) {
+	parts := strings.SplitN(cursor, "|", 4)
+	if len(parts) != 4 {
+		return time.Time{}, 0, "", 0, fmt.Errorf("malformed cursor: %q", cursor)
 	}
 	t, err = time.Parse(time.RFC3339, parts[0])
 	if err != nil {
-		return time.Time{}, 0, "", fmt.Errorf("invalid cursor timestamp: %w", err)
+		return time.Time{}, 0, "", 0, fmt.Errorf("invalid cursor timestamp: %w", err)
 	}
 	id, err = strconv.ParseInt(parts[2], 10, 64)
 	if err != nil {
-		return time.Time{}, 0, "", fmt.Errorf("invalid cursor id: %w", err)
+		return time.Time{}, 0, "", 0, fmt.Errorf("invalid cursor id: %w", err)
 	}
-	return t, id, parts[1], nil
+	version, err = strconv.Atoi(parts[3])
+	if err != nil {
+		return time.Time{}, 0, "", 0, fmt.Errorf("invalid cursor version: %w", err)
+	}
+	return t, id, parts[1], version, nil
 }
 
 // fetchHistory returns a HistoryFetcher reading pages of past changes
@@ -191,11 +197,11 @@ func fetchHistory(cfg *config.Config, db *store.Store) feed.HistoryFetcher {
 		if before == "" {
 			dbChanges, err = db.QueryLatest(limit + 1)
 		} else {
-			t, id, typ, perr := decodeHistoryCursor(before)
+			t, id, typ, version, perr := decodeHistoryCursor(before)
 			if perr != nil {
 				return nil, "", false, fmt.Errorf("invalid before cursor: %w", perr)
 			}
-			dbChanges, err = db.QueryBefore(t, id, typ, limit+1)
+			dbChanges, err = db.QueryBefore(t, id, typ, version, limit+1)
 		}
 		if err != nil {
 			return nil, "", false, err
@@ -254,7 +260,10 @@ func changeFromDB(cfg *config.Config, dbChange store.RecentChange) change {
 	elemType := typeToString(dbChange.Type)
 
 	action := "modify"
-	if dbChange.Version == 1 {
+	switch {
+	case dbChange.Deleted:
+		action = "delete"
+	case dbChange.Version == 1:
 		action = "create"
 	}
 

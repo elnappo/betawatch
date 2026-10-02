@@ -122,7 +122,7 @@ func (t *Tx) Save(el Element) error {
 	}
 
 	if cur > 0 {
-		if err := t.retire(el.ID, el.Type, false); err != nil {
+		if err := t.retire(el.ID, el.Type); err != nil {
 			return err
 		}
 	}
@@ -183,28 +183,56 @@ func marshalTags(tags map[string]string) (any, error) {
 	return string(b), nil
 }
 
-// Delete moves a live element to elements_history with deleted set. A
-// delete carries no tags, so it can only be matched by id and type; one
-// for an element that is not stored is ignored. It reports whether an
-// element was moved.
-func (t *Tx) Delete(id int64, typ string, version int) (bool, error) {
-	cur, err := t.version(id, typ)
-	if err != nil || cur == 0 || cur >= version {
+// Delete moves a live element to elements_history with deleted set, using
+// el's own version, timestamp, user and changeset: a delete is its own
+// event, distinct from the edit that made the element's last live version,
+// and the feed needs that event's own timestamp to place it correctly. A
+// delete carries no tags, so el can only be matched by id and type against
+// what is stored; one for an element that is not stored, or that is not
+// newer than what is live, is ignored. It reports whether an element was
+// moved.
+func (t *Tx) Delete(el Element) (bool, error) {
+	cur, err := t.version(el.ID, el.Type)
+	if err != nil || cur == 0 || cur >= el.Version {
 		return false, err
 	}
-	return true, t.retire(id, typ, true)
+	return true, t.retireDeleted(el)
 }
 
-// retire moves the live row of an element into elements_history.
-func (t *Tx) retire(id int64, typ string, deleted bool) error {
+// retire moves the live row of an element into elements_history unchanged,
+// keeping its own version, timestamp, user and changeset: used when a newer
+// version is about to become live, so the row it replaces is still that
+// version's own event.
+func (t *Tx) retire(id int64, typ string) error {
 	if _, err := t.tx.Exec(`
 		INSERT OR IGNORE INTO elements_history
 			(id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags, deleted)
-		SELECT id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags, ?
-		FROM elements WHERE id = ? AND type = ?`, deleted, id, typ); err != nil {
+		SELECT id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags, 0
+		FROM elements WHERE id = ? AND type = ?`, id, typ); err != nil {
 		return err
 	}
 	_, err := t.tx.Exec(`DELETE FROM elements WHERE id = ? AND type = ?`, id, typ)
+	return err
+}
+
+// retireDeleted moves the live row of el's element into elements_history as
+// a delete, stamped with el's own version, timestamp, uid, user and
+// changeset rather than the live row's: the delete is its own event. lat,
+// lon and tags come from the live row, since a delete carries none of its
+// own.
+func (t *Tx) retireDeleted(el Element) error {
+	if err := t.upsertChangeset(el); err != nil {
+		return err
+	}
+	if _, err := t.tx.Exec(`
+		INSERT OR IGNORE INTO elements_history
+			(id, type, version, lat, lon, uid, user, timestamp, changeset_id, tags, deleted)
+		SELECT id, type, ?, lat, lon, ?, ?, ?, ?, tags, 1
+		FROM elements WHERE id = ? AND type = ?`,
+		el.Version, el.UID, el.User, ts(el.Timestamp), el.Changeset, el.ID, el.Type); err != nil {
+		return err
+	}
+	_, err := t.tx.Exec(`DELETE FROM elements WHERE id = ? AND type = ?`, el.ID, el.Type)
 	return err
 }
 
@@ -225,46 +253,66 @@ type RecentChange struct {
 	Changeset int64
 	Tags      map[string]string
 	Name      string
+	Deleted   bool
 }
 
-// QueryRecent returns all live elements modified since the given timestamp,
-// ordered by timestamp ascending.
+// changesColumns is the column list QueryRecent, QueryLatest, QueryBefore
+// and PreviousVersion all select, shared so their two arms (elements,
+// elements_history) and scanChanges agree on shape. elements holds no
+// deleted column, since a live row is by definition not deleted.
+const changesColumns = `id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted`
+
+// QueryRecent returns every element version recorded since the given
+// timestamp, live or superseded, ordered by timestamp ascending. A version
+// superseded within the polling interval, or a delete, is visible here as
+// its own row, not just the version that ended up live.
 func (s *Store) QueryRecent(since time.Time) ([]RecentChange, error) {
 	return scanChanges(s.db.Query(`
-		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
-		FROM elements
+		SELECT `+changesColumns+` FROM (
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
+			UNION ALL
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
+		)
 		WHERE timestamp > ?
 		ORDER BY timestamp ASC
 	`, ts(since)))
 }
 
-// QueryLatest returns the most recently modified live elements, newest
-// first, up to limit. The (id, type) tiebreak matches QueryBefore's, so
-// paging from this page into the next never skips or repeats a row that
-// shares a timestamp with the page boundary.
+// QueryLatest returns the most recently recorded element versions, live or
+// superseded, newest first, up to limit. The (id, type, version) tiebreak
+// matches QueryBefore's, so paging from this page into the next never skips
+// or repeats a row that shares a timestamp with the page boundary.
 func (s *Store) QueryLatest(limit int) ([]RecentChange, error) {
 	return scanChanges(s.db.Query(`
-		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
-		FROM elements
-		ORDER BY timestamp DESC, id DESC, type DESC
+		SELECT `+changesColumns+` FROM (
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
+			UNION ALL
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
+		)
+		ORDER BY timestamp DESC, id DESC, type DESC, version DESC
 		LIMIT ?
 	`, limit))
 }
 
-// QueryBefore returns live elements ordered before the given (timestamp,
-// id, type), newest first, up to limit. It is how the web view pages into
-// the past. The full triple is needed, not just the timestamp: many
-// elements share a timestamp (a single backfill batch commonly holds
-// dozens), so cutting off on timestamp alone would drop the rest of that
-// group whenever a page boundary landed inside it.
-func (s *Store) QueryBefore(before time.Time, id int64, typ string, limit int) ([]RecentChange, error) {
+// QueryBefore returns element versions, live or superseded, ordered before
+// the given (timestamp, id, type, version), newest first, up to limit. It
+// is how the web view pages into the past. The full tuple is needed, not
+// just the timestamp: many versions share a timestamp (a single backfill
+// batch commonly holds dozens), and since this change the same (id, type)
+// can also appear twice at different versions, so cutting off on anything
+// less than the full tuple would drop or repeat rows whenever a page
+// boundary landed inside such a group.
+func (s *Store) QueryBefore(before time.Time, id int64, typ string, version, limit int) ([]RecentChange, error) {
 	return scanChanges(s.db.Query(`
-		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
-		FROM elements
-		WHERE (timestamp, id, type) < (?, ?, ?)
-		ORDER BY timestamp DESC, id DESC, type DESC
+		SELECT `+changesColumns+` FROM (
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
+			UNION ALL
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
+		)
+		WHERE (timestamp, id, type, version) < (?, ?, ?, ?)
+		ORDER BY timestamp DESC, id DESC, type DESC, version DESC
 		LIMIT ?
-	`, ts(before), id, typ, limit))
+	`, ts(before), id, typ, version, limit))
 }
 
 // PreviousVersion returns the version just before version for an element,
@@ -272,7 +320,7 @@ func (s *Store) QueryBefore(before time.Time, id int64, typ string, limit int) (
 // create has nothing before it) or the history has a gap.
 func (s *Store) PreviousVersion(id int64, typ string, version int) (*RecentChange, error) {
 	changes, err := scanChanges(s.db.Query(`
-		SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags
+		SELECT `+changesColumns+`
 		FROM elements_history
 		WHERE id = ? AND type = ? AND version = ?
 	`, id, typ, version-1))
@@ -282,8 +330,7 @@ func (s *Store) PreviousVersion(id int64, typ string, version int) (*RecentChang
 	return &changes[0], nil
 }
 
-// scanChanges reads the rows of a query selecting the columns QueryRecent,
-// QueryLatest, QueryBefore and PreviousVersion all share.
+// scanChanges reads the rows of a query selecting changesColumns.
 func scanChanges(rows *sql.Rows, err error) ([]RecentChange, error) {
 	if err != nil {
 		return nil, err
@@ -294,7 +341,7 @@ func scanChanges(rows *sql.Rows, err error) ([]RecentChange, error) {
 	for rows.Next() {
 		var c RecentChange
 		var tagsJSON *string
-		if err := rows.Scan(&c.ID, &c.Type, &c.Version, &c.Lat, &c.Lon, &c.Timestamp, &c.User, &c.UID, &c.Changeset, &tagsJSON); err != nil {
+		if err := rows.Scan(&c.ID, &c.Type, &c.Version, &c.Lat, &c.Lon, &c.Timestamp, &c.User, &c.UID, &c.Changeset, &tagsJSON, &c.Deleted); err != nil {
 			return nil, err
 		}
 		c.Tags = make(map[string]string)

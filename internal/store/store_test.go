@@ -48,6 +48,15 @@ func el(version int, at time.Time) Element {
 	}
 }
 
+// delEl builds the Element a delete diff carries: id, type and version
+// identify what is being deleted, but no tags, lat or lon.
+func delEl(id int64, typ string, version int, at time.Time) Element {
+	return Element{
+		ID: id, Type: typ, Version: version,
+		UID: 7, User: "u", Timestamp: at, Changeset: 100,
+	}
+}
+
 func TestSaveMovesOldVersionToHistory(t *testing.T) {
 	s := open(t)
 	now := time.Now()
@@ -118,14 +127,14 @@ func TestDelete(t *testing.T) {
 	apply(t, s, func(tx *Tx) {
 		must(t, tx.Save(el(1, now)))
 
-		if ok, err := tx.Delete(999, Node, 2); err != nil || ok {
+		if ok, err := tx.Delete(delEl(999, Node, 2, now)); err != nil || ok {
 			t.Errorf("delete of unknown element = %v, %v; want ignored", ok, err)
 		}
 		// The same id as a different type is a different element.
-		if ok, err := tx.Delete(1, Way, 2); err != nil || ok {
+		if ok, err := tx.Delete(delEl(1, Way, 2, now)); err != nil || ok {
 			t.Errorf("delete of other type = %v, %v; want ignored", ok, err)
 		}
-		if ok, err := tx.Delete(1, Node, 2); err != nil || !ok {
+		if ok, err := tx.Delete(delEl(1, Node, 2, now.Add(time.Minute))); err != nil || !ok {
 			t.Errorf("delete = %v, %v; want moved", ok, err)
 		}
 	})
@@ -135,6 +144,60 @@ func TestDelete(t *testing.T) {
 	}
 	if n := count(t, s, `SELECT count(*) FROM elements_history WHERE deleted = 1 AND tags IS NOT NULL`); n != 1 {
 		t.Errorf("deleted history rows = %d, want 1", n)
+	}
+}
+
+// TestDeleteStampsItsOwnEvent checks that a delete's history row carries
+// the delete event's own version, timestamp, user and changeset, not the
+// live row's it replaces: a delete is distinct from the edit that made the
+// element's last live version.
+func TestDeleteStampsItsOwnEvent(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	deletedAt := now.Add(time.Hour)
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+
+		d := Element{
+			ID: 1, Type: Node, Version: 2,
+			UID: 9, User: "deleter", Timestamp: deletedAt, Changeset: 200,
+		}
+		if ok, err := tx.Delete(d); err != nil || !ok {
+			t.Fatalf("delete = %v, %v; want moved", ok, err)
+		}
+	})
+
+	var version int
+	var user string
+	var uid, changeset int64
+	var timestamp string
+	err := s.db.QueryRow(`
+		SELECT version, user, uid, changeset_id, timestamp
+		FROM elements_history WHERE id = 1 AND type = 'n' AND deleted = 1`).
+		Scan(&version, &user, &uid, &changeset, &timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 2 {
+		t.Errorf("version = %d, want 2", version)
+	}
+	if user != "deleter" {
+		t.Errorf("user = %q, want deleter", user)
+	}
+	if uid != 9 {
+		t.Errorf("uid = %d, want 9", uid)
+	}
+	if changeset != 200 {
+		t.Errorf("changeset = %d, want 200", changeset)
+	}
+	if want := ts(deletedAt); timestamp != want {
+		t.Errorf("timestamp = %q, want %q", timestamp, want)
+	}
+
+	// lat/lon/tags still come from the live row, since the delete itself
+	// carries none.
+	if n := count(t, s, `SELECT count(*) FROM elements_history WHERE id = 1 AND type = 'n' AND deleted = 1 AND lat IS NOT NULL AND tags IS NOT NULL`); n != 1 {
+		t.Errorf("lat/tags carried over = %d, want 1", n)
 	}
 }
 
@@ -187,6 +250,108 @@ func TestPreviousVersionOfACreate(t *testing.T) {
 	}
 	if prev != nil {
 		t.Errorf("PreviousVersion of version 1 = %+v, want nil", prev)
+	}
+}
+
+func TestQueryRecentIncludesSupersededVersions(t *testing.T) {
+	// Both versions were recorded since the given timestamp, so both
+	// should appear, not just the one that ended up live.
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		must(t, tx.Save(el(2, now.Add(time.Minute))))
+	})
+
+	changes, err := s.QueryRecent(now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("len(changes) = %d, want 2", len(changes))
+	}
+	if changes[0].Version != 1 || changes[1].Version != 2 {
+		t.Errorf("versions = %d, %d, want 1, 2", changes[0].Version, changes[1].Version)
+	}
+	if changes[0].Deleted || changes[1].Deleted {
+		t.Error("neither version is a delete")
+	}
+}
+
+func TestQueryLatestIncludesSupersededVersions(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		must(t, tx.Save(el(2, now.Add(time.Minute))))
+	})
+
+	changes, err := s.QueryLatest(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("len(changes) = %d, want 2", len(changes))
+	}
+	// Newest first.
+	if changes[0].Version != 2 || changes[1].Version != 1 {
+		t.Errorf("versions = %d, %d, want 2, 1", changes[0].Version, changes[1].Version)
+	}
+}
+
+func TestQueryLatestIncludesDeletes(t *testing.T) {
+	// Deleting version 1 retires its row straight into elements_history
+	// stamped as the delete event (version 2): there was never a separate
+	// live row for version 1 to leave behind, so only one row results.
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		if _, err := tx.Delete(delEl(1, Node, 2, now.Add(time.Minute))); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	changes, err := s.QueryLatest(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("len(changes) = %d, want 1", len(changes))
+	}
+	if !changes[0].Deleted {
+		t.Error("change should be the delete")
+	}
+	if changes[0].Version != 2 {
+		t.Errorf("version = %d, want 2", changes[0].Version)
+	}
+}
+
+func TestQueryBeforePagesAcrossSharedTimestampAcrossVersions(t *testing.T) {
+	// Two versions of the same element at the same timestamp: the
+	// (timestamp, id, type, version) tiebreak must still see both exactly
+	// once when a page boundary falls between them.
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		must(t, tx.Save(el(2, now)))
+	})
+
+	first, err := s.QueryLatest(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].Version != 2 {
+		t.Fatalf("first page = %+v, want version 2", first)
+	}
+
+	rest, err := s.QueryBefore(first[0].Timestamp, first[0].ID, first[0].Type, first[0].Version, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) != 1 || rest[0].Version != 1 {
+		t.Fatalf("rest = %+v, want version 1", rest)
 	}
 }
 

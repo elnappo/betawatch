@@ -109,6 +109,18 @@ func TestChangeFromDB(t *testing.T) {
 	}
 }
 
+func TestChangeFromDBDeleteTakesPrecedence(t *testing.T) {
+	// A delete of a version-1 element should report "delete", not "create":
+	// Deleted must win over the Version == 1 check.
+	got := changeFromDB(loadConfig(t), store.RecentChange{
+		ID: 3, Type: "w", Version: 1, Deleted: true,
+		Tags: map[string]string{"climbing": "crag"},
+	})
+	if got.Action != "delete" {
+		t.Errorf("Action = %q, want delete", got.Action)
+	}
+}
+
 func TestLatestTimestampOfEmptyDB(t *testing.T) {
 	db := openDB(t)
 	got, err := latestTimestamp(db)
@@ -226,6 +238,38 @@ func TestFetchHistoryPagesThroughSharedTimestamp(t *testing.T) {
 		if !seen[id] {
 			t.Errorf("id %d was never returned", id)
 		}
+	}
+}
+
+func TestFetchHistoryIncludesSupersededVersions(t *testing.T) {
+	// Saving two versions of the same element should surface both as
+	// separate entries, not just the one that ended up live.
+	now := time.Now().UTC().Truncate(time.Second)
+	v1 := climber(1, now.Add(-time.Minute))
+	v2 := climber(1, now)
+	v2.Version = 2
+
+	db := openDB(t, v1, v2)
+	fetch := fetchHistory(loadConfig(t), db)
+	changes, _, _, err := fetch("", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("len(changes) = %d, want 2", len(changes))
+	}
+	var newest, oldest change
+	if err := json.Unmarshal(changes[0], &newest); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(changes[1], &oldest); err != nil {
+		t.Fatal(err)
+	}
+	if newest.Version != 2 || newest.Action != "modify" {
+		t.Errorf("newest = v%d/%s, want v2/modify", newest.Version, newest.Action)
+	}
+	if oldest.Version != 1 || oldest.Action != "create" {
+		t.Errorf("oldest = v%d/%s, want v1/create", oldest.Version, oldest.Action)
 	}
 }
 

@@ -51,8 +51,9 @@ and matches nothing.
 
 **Deletes carry no tags.** Planet diffs strip them: on 2026-09-25 all
 250,535 deletes were untagged. A deleted crag is indistinguishable from
-any other delete, so deletes never match the filter. Seeing them needs a
-state database of known climbing elements, which does not exist yet.
+any other delete, so deletes never match the filter on their own; a delete
+is only caught by matching its id and type against `elements`, the store's
+record of what is currently known to be climbing-related.
 
 **Diffs hold only the new state.** There is no previous version, so a
 change that *removes* `sport=climbing` is invisible, as is a moved child
