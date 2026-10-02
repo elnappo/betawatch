@@ -36,6 +36,20 @@ type Element struct {
 	Tags      map[string]string
 }
 
+// ChangesetMetadata is the changeset information the minute diffs never
+// carry, fetched separately from the OSM API. changes_count has no field
+// here: github.com/paulmach/osm's Changeset.ChangesCount is tagged
+// `xml:"num_changes"`, the API's old attribute name, so it always decodes
+// to 0 against the live API, which now sends changes_count instead. NULL
+// is the honest value until that's fixed upstream.
+type ChangesetMetadata struct {
+	CreatedAt                                       time.Time
+	Comment, CreatedBy, ImageryUsed, Source, Locale string
+	DataUsed, Hashtags, Host                        string
+	Bot, ReviewRequested                            bool
+	ChangesetsCount                                 int
+}
+
 // Store is a SQLite database of elements.
 type Store struct {
 	db *sql.DB
@@ -139,13 +153,47 @@ func (t *Tx) Save(el Element) error {
 
 // upsertChangeset inserts a changeset row if missing. The diffs do not
 // carry the changeset itself, only which elements belong to it, so
-// timestamp and the other changeset columns stay NULL until a metadata
-// source is added.
+// timestamp and the metadata columns stay NULL until SetChangesetMetadata
+// fills them in from the OSM API.
 func (t *Tx) upsertChangeset(el Element) error {
 	_, err := t.tx.Exec(`
 		INSERT INTO changesets (id, uid, user) VALUES (?, ?, ?)
 		ON CONFLICT (id) DO NOTHING`,
 		el.Changeset, el.UID, el.User)
+	return err
+}
+
+// NeedsChangesetMetadata reports whether a changeset has not yet had its
+// OSM API metadata fetched. timestamp is the tell: it is unset until
+// SetChangesetMetadata fills it with the changeset's own created_at, which
+// the API always returns, so a changeset whose other fields (comment, say)
+// turn out genuinely empty is still correctly seen as fetched. A changeset
+// not stored at all is also reported as not needing it: with nothing in the
+// diffs to attach the fetch to, there is nothing to call this before.
+func (s *Store) NeedsChangesetMetadata(id int64) (bool, error) {
+	var needed bool
+	err := s.db.QueryRow(`SELECT timestamp IS NULL FROM changesets WHERE id = ?`, id).Scan(&needed)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return needed, err
+}
+
+// SetChangesetMetadata stores a changeset's OSM API metadata, including its
+// created_at as timestamp, which also marks it fetched: see
+// NeedsChangesetMetadata. Runs outside any element transaction: the fetch
+// is a network call, which must not hold a SQLite write lock open while it
+// waits.
+func (s *Store) SetChangesetMetadata(id int64, m ChangesetMetadata) error {
+	_, err := s.db.Exec(`
+		UPDATE changesets SET
+			timestamp = ?, comment = ?, created_by = ?, imagery_used = ?, source = ?, locale = ?,
+			data_used = ?, hashtags = ?, host = ?, bot = ?, review_requested = ?,
+			changesets_count = ?
+		WHERE id = ?`,
+		ts(m.CreatedAt), m.Comment, m.CreatedBy, m.ImageryUsed, m.Source, m.Locale,
+		m.DataUsed, m.Hashtags, m.Host, m.Bot, m.ReviewRequested,
+		m.ChangesetsCount, id)
 	return err
 }
 
@@ -243,24 +291,32 @@ func ts(t time.Time) string {
 
 // RecentChange is an element record with metadata from the database.
 type RecentChange struct {
-	ID        int64
-	Type      string
-	Version   int
-	Lat, Lon  *float64 // nodes only
-	Timestamp time.Time
-	User      string
-	UID       int64
-	Changeset int64
-	Tags      map[string]string
-	Name      string
-	Deleted   bool
+	ID                 int64
+	Type               string
+	Version            int
+	Lat, Lon           *float64 // nodes only
+	Timestamp          time.Time
+	User               string
+	UID                int64
+	Changeset          int64
+	Tags               map[string]string
+	Name               string
+	Deleted            bool
+	Comment, CreatedBy *string // nil until the changeset's OSM API metadata is fetched
 }
 
 // changesColumns is the column list QueryRecent, QueryLatest, QueryBefore
 // and PreviousVersion all select, shared so their two arms (elements,
 // elements_history) and scanChanges agree on shape. elements holds no
-// deleted column, since a live row is by definition not deleted.
-const changesColumns = `id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted`
+// deleted column, since a live row is by definition not deleted. Columns
+// are qualified against the "u" alias every caller gives its element
+// union/table, since the changesets join below adds a second id column.
+const changesColumns = `u.id, u.type, u.version, u.lat, u.lon, u.timestamp, u.user, u.uid, u.changeset_id, u.tags, u.deleted, cs.comment, cs.created_by`
+
+// changesetJoin attaches each element row's changeset metadata, left so a
+// changeset not yet fetched (or, for an old row, not stored at all) still
+// returns the element with NULL comment/created_by rather than dropping it.
+const changesetJoin = `LEFT JOIN changesets cs ON cs.id = u.changeset_id`
 
 // QueryRecent returns every element version recorded since the given
 // timestamp, live or superseded, ordered by timestamp ascending. A version
@@ -272,9 +328,9 @@ func (s *Store) QueryRecent(since time.Time) ([]RecentChange, error) {
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
 			UNION ALL
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
-		)
-		WHERE timestamp > ?
-		ORDER BY timestamp ASC
+		) u `+changesetJoin+`
+		WHERE u.timestamp > ?
+		ORDER BY u.timestamp ASC
 	`, ts(since)))
 }
 
@@ -288,8 +344,8 @@ func (s *Store) QueryLatest(limit int) ([]RecentChange, error) {
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
 			UNION ALL
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
-		)
-		ORDER BY timestamp DESC, id DESC, type DESC, version DESC
+		) u `+changesetJoin+`
+		ORDER BY u.timestamp DESC, u.id DESC, u.type DESC, u.version DESC
 		LIMIT ?
 	`, limit))
 }
@@ -308,9 +364,9 @@ func (s *Store) QueryBefore(before time.Time, id int64, typ string, version, lim
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
 			UNION ALL
 			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, deleted FROM elements_history
-		)
-		WHERE (timestamp, id, type, version) < (?, ?, ?, ?)
-		ORDER BY timestamp DESC, id DESC, type DESC, version DESC
+		) u `+changesetJoin+`
+		WHERE (u.timestamp, u.id, u.type, u.version) < (?, ?, ?, ?)
+		ORDER BY u.timestamp DESC, u.id DESC, u.type DESC, u.version DESC
 		LIMIT ?
 	`, ts(before), id, typ, version, limit))
 }
@@ -321,8 +377,8 @@ func (s *Store) QueryBefore(before time.Time, id int64, typ string, version, lim
 func (s *Store) PreviousVersion(id int64, typ string, version int) (*RecentChange, error) {
 	changes, err := scanChanges(s.db.Query(`
 		SELECT `+changesColumns+`
-		FROM elements_history
-		WHERE id = ? AND type = ? AND version = ?
+		FROM elements_history u `+changesetJoin+`
+		WHERE u.id = ? AND u.type = ? AND u.version = ?
 	`, id, typ, version-1))
 	if err != nil || len(changes) == 0 {
 		return nil, err
@@ -341,7 +397,7 @@ func scanChanges(rows *sql.Rows, err error) ([]RecentChange, error) {
 	for rows.Next() {
 		var c RecentChange
 		var tagsJSON *string
-		if err := rows.Scan(&c.ID, &c.Type, &c.Version, &c.Lat, &c.Lon, &c.Timestamp, &c.User, &c.UID, &c.Changeset, &tagsJSON, &c.Deleted); err != nil {
+		if err := rows.Scan(&c.ID, &c.Type, &c.Version, &c.Lat, &c.Lon, &c.Timestamp, &c.User, &c.UID, &c.Changeset, &tagsJSON, &c.Deleted, &c.Comment, &c.CreatedBy); err != nil {
 			return nil, err
 		}
 		c.Tags = make(map[string]string)

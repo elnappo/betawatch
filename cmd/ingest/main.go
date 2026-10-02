@@ -18,9 +18,11 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/paulmach/osm"
+	"github.com/paulmach/osm/osmapi"
 	"github.com/paulmach/osm/osmpbf"
 	"github.com/paulmach/osm/replication"
 
@@ -142,10 +144,12 @@ func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, back
 		return fmt.Errorf("reading state: %w", err)
 	}
 
-	ds := replication.NewDatasource(&http.Client{
-		Timeout:   1 * time.Minute,
+	client := &http.Client{
+		Timeout:   30 * time.Second,
 		Transport: &agentTransport{},
-	})
+	}
+	ds := replication.NewDatasource(client)
+	apiDS := osmapi.NewDatasource(client)
 
 	latest, state, err := ds.CurrentMinuteState(ctx)
 	if err != nil {
@@ -166,7 +170,7 @@ func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, back
 
 	for {
 		for ; next <= latest; next++ {
-			if err := ingest(ctx, ds, db, cfg, cursor, next); err != nil {
+			if err := ingest(ctx, ds, apiDS, db, cfg, cursor, next); err != nil {
 				return err
 			}
 		}
@@ -188,8 +192,9 @@ func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, back
 	}
 }
 
-// ingest applies one minute diff in a single transaction.
-func ingest(ctx context.Context, ds *replication.Datasource, db *store.Store, cfg *config.Config, cursor *feed.State, num replication.MinuteSeqNum) error {
+// ingest applies one minute diff in a single transaction, then fetches OSM
+// API metadata for any changeset it just touched.
+func ingest(ctx context.Context, ds *replication.Datasource, apiDS *osmapi.Datasource, db *store.Store, cfg *config.Config, cursor *feed.State, num replication.MinuteSeqNum) error {
 	ch, err := ds.Minute(ctx, num)
 	if err != nil {
 		if replication.NotFound(err) {
@@ -207,7 +212,7 @@ func ingest(ctx context.Context, ds *replication.Datasource, db *store.Store, cf
 	}
 	defer tx.Rollback()
 
-	saved, deleted, err := apply(tx, cfg, ch)
+	saved, deleted, changesets, err := apply(tx, cfg, ch)
 	if err != nil {
 		return fmt.Errorf("minute %d: %w", num, err)
 	}
@@ -218,14 +223,26 @@ func ingest(ctx context.Context, ds *replication.Datasource, db *store.Store, cf
 	// run is indistinguishable from a hung one.
 	fmt.Fprintf(os.Stderr, "minute %d: %d saved, %d deleted\n", num, saved, deleted)
 
+	// Fetching changeset metadata is a network call and must not hold the
+	// transaction's write lock open, so it only happens after the commit,
+	// best effort: a fetch failure here is not a reason to fail the minute
+	// or lose the cursor.
+	for id := range changesets {
+		if err := enrichChangeset(ctx, apiDS, db, id); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: fetching changeset %d: %v\n", id, err)
+		}
+	}
+
 	// Save only after the commit, so a crash repeats a diff rather than
 	// losing it. The store ignores the repeat.
 	return cursor.Save(uint64(num))
 }
 
-// apply writes a diff to the transaction and returns how many elements
-// it saved and deleted.
-func apply(tx *store.Tx, cfg *config.Config, ch *osm.Change) (saved, deleted int, err error) {
+// apply writes a diff to the transaction and returns how many elements it
+// saved and deleted, plus the ids of the changesets those elements belong
+// to, so their metadata can be fetched once the transaction commits.
+func apply(tx *store.Tx, cfg *config.Config, ch *osm.Change) (saved, deleted int, changesets map[int64]struct{}, err error) {
+	changesets = make(map[int64]struct{})
 	for _, set := range []*osm.OSM{ch.Create, ch.Modify} {
 		if set == nil {
 			continue
@@ -239,16 +256,17 @@ func apply(tx *store.Tx, cfg *config.Config, ch *osm.Change) (saved, deleted int
 			keep := cfg.Selects(string(el.ElementID().Type()), e.Tags)
 			if !keep {
 				if keep, err = tx.Has(e.ID, e.Type); err != nil {
-					return saved, deleted, err
+					return saved, deleted, changesets, err
 				}
 			}
 			if !keep {
 				continue
 			}
 			if err := tx.Save(e); err != nil {
-				return saved, deleted, err
+				return saved, deleted, changesets, err
 			}
 			saved++
+			changesets[e.Changeset] = struct{}{}
 		}
 	}
 
@@ -259,14 +277,52 @@ func apply(tx *store.Tx, cfg *config.Config, ch *osm.Change) (saved, deleted int
 			e := toElement(el)
 			ok, err := tx.Delete(e)
 			if err != nil {
-				return saved, deleted, err
+				return saved, deleted, changesets, err
 			}
 			if ok {
 				deleted++
+				changesets[e.Changeset] = struct{}{}
 			}
 		}
 	}
-	return saved, deleted, nil
+	return saved, deleted, changesets, nil
+}
+
+// enrichChangeset fetches a changeset's metadata from the OSM API and
+// stores it, unless it has already been fetched.
+func enrichChangeset(ctx context.Context, apiDS *osmapi.Datasource, db *store.Store, id int64) error {
+	needed, err := db.NeedsChangesetMetadata(id)
+	if err != nil || !needed {
+		return err
+	}
+	cs, err := apiDS.Changeset(ctx, osm.ChangesetID(id))
+	if err != nil {
+		return err
+	}
+	return db.SetChangesetMetadata(id, toChangesetMetadata(cs))
+}
+
+// toChangesetMetadata converts an OSM API changeset response to the plain
+// struct store.SetChangesetMetadata stores. Most fields are plain changeset
+// tags with no field on osm.Changeset; Tags.Find returns "" for a tag that
+// is absent, which is exactly what an empty column should hold. There is no
+// ChangesCount here: see the comment on store.ChangesetMetadata.
+func toChangesetMetadata(cs *osm.Changeset) store.ChangesetMetadata {
+	changesetsCount, _ := strconv.Atoi(cs.Tags.Find("changesets_count"))
+	return store.ChangesetMetadata{
+		CreatedAt:       cs.CreatedAt,
+		Comment:         cs.Comment(),
+		CreatedBy:       cs.CreatedBy(),
+		ImageryUsed:     cs.ImageryUsed(),
+		Source:          cs.Source(),
+		Locale:          cs.Locale(),
+		DataUsed:        cs.Tags.Find("data_used"),
+		Hashtags:        cs.Tags.Find("hashtags"),
+		Host:            cs.Host(),
+		Bot:             cs.Bot(),
+		ReviewRequested: cs.Tags.Find("review_requested") == "yes",
+		ChangesetsCount: changesetsCount,
+	}
 }
 
 func toElement(el osm.Element) store.Element {

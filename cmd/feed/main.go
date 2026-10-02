@@ -278,6 +278,8 @@ func changeFromDB(cfg *config.Config, dbChange store.RecentChange) change {
 		User:         dbChange.User,
 		UID:          dbChange.UID,
 		Changeset:    dbChange.Changeset,
+		CreatedBy:    deref(dbChange.CreatedBy),
+		Comment:      deref(dbChange.Comment),
 		Name:         dbChange.Name,
 		Classes:      cfg.Classes(dbChange.Type, dbChange.Tags),
 		Unwanted:     cfg.Unwanted(dbChange.Type, dbChange.Tags),
@@ -287,6 +289,16 @@ func changeFromDB(cfg *config.Config, dbChange store.RecentChange) change {
 		URL:          fmt.Sprintf("https://www.openstreetmap.org/%s/%d", elemType, dbChange.ID),
 		ChangesetURL: fmt.Sprintf("https://www.openstreetmap.org/changeset/%d", dbChange.Changeset),
 	}
+}
+
+// deref returns the string s points to, or "" if the changeset's metadata
+// has not been fetched yet (or the field was genuinely empty): both cases
+// should render as nothing, so callers never need to distinguish them.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // typeToString converts single-letter type codes to full names.
@@ -316,6 +328,8 @@ type change struct {
 	User         string            `json:"user,omitempty"`
 	UID          int64             `json:"uid,omitempty"`
 	Changeset    int64             `json:"changeset"`
+	CreatedBy    string            `json:"created_by,omitempty"` // editing software, from the changeset's OSM API metadata
+	Comment      string            `json:"comment,omitempty"`    // changeset comment, from the same source
 	Name         string            `json:"name,omitempty"`
 	Classes      []string          `json:"classes,omitempty"`
 	Unwanted     []string          `json:"unwanted,omitempty"`

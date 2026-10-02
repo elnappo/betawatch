@@ -1,7 +1,11 @@
 -- Requires PRAGMA foreign_keys = ON on every connection.
 
 -- Only id, uid and user are filled from the minute diffs. The other
--- columns, including timestamp, are NULL until a metadata source is added.
+-- columns, including timestamp, stay NULL until the OSM API is asked for
+-- this changeset's metadata; timestamp then holds the changeset's own
+-- created_at, which the API always returns, so "timestamp IS NULL" is also
+-- how a fetch still owed is told apart from one already done, even for a
+-- changeset whose comment (say) turned out to genuinely be empty.
 CREATE TABLE IF NOT EXISTS changesets (
     id BIGINT PRIMARY KEY,
     timestamp DATETIME,

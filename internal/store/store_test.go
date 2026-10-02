@@ -202,8 +202,9 @@ func TestDeleteStampsItsOwnEvent(t *testing.T) {
 }
 
 func TestChangesetTimestampStaysNull(t *testing.T) {
-	// The diffs never carry the changeset itself, so nothing should ever
-	// derive a changeset timestamp from an element's.
+	// The diffs never carry the changeset itself, so Save must never derive
+	// a changeset timestamp from an element's; only SetChangesetMetadata,
+	// from the OSM API's created_at, may set it.
 	s := open(t)
 	apply(t, s, func(tx *Tx) {
 		must(t, tx.Save(el(1, time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC))))
@@ -214,6 +215,121 @@ func TestChangesetTimestampStaysNull(t *testing.T) {
 	}
 	if got.Valid {
 		t.Errorf("changeset timestamp = %q, want NULL", got.String)
+	}
+}
+
+func TestNeedsChangesetMetadata(t *testing.T) {
+	s := open(t)
+	apply(t, s, func(tx *Tx) { must(t, tx.Save(el(1, time.Now()))) })
+
+	needed, err := s.NeedsChangesetMetadata(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !needed {
+		t.Error("NeedsChangesetMetadata = false right after Save, want true")
+	}
+
+	// Comment left empty: even a changeset whose comment genuinely turns
+	// out blank must still count as fetched, since CreatedAt is what
+	// NeedsChangesetMetadata actually keys on.
+	if err := s.SetChangesetMetadata(100, ChangesetMetadata{CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	needed, err = s.NeedsChangesetMetadata(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needed {
+		t.Error("NeedsChangesetMetadata = true after SetChangesetMetadata, want false")
+	}
+}
+
+func TestNeedsChangesetMetadataOfUnknownChangeset(t *testing.T) {
+	s := open(t)
+	needed, err := s.NeedsChangesetMetadata(999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needed {
+		t.Error("NeedsChangesetMetadata of an unstored changeset = true, want false")
+	}
+}
+
+func TestSetChangesetMetadataStoresAllFields(t *testing.T) {
+	s := open(t)
+	apply(t, s, func(tx *Tx) { must(t, tx.Save(el(1, time.Now()))) })
+
+	createdAt := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	m := ChangesetMetadata{
+		CreatedAt: createdAt,
+		Comment:   "fixed a wall", CreatedBy: "JOSM/1.5", ImageryUsed: "Bing",
+		Source: "survey", Locale: "en", DataUsed: "Esri", Hashtags: "#climbing",
+		Host: "https://www.openstreetmap.org/edit", Bot: true, ReviewRequested: true,
+		ChangesetsCount: 42,
+	}
+	if err := s.SetChangesetMetadata(100, m); err != nil {
+		t.Fatal(err)
+	}
+
+	var got ChangesetMetadata
+	var timestamp string
+	err := s.db.QueryRow(`
+		SELECT timestamp, comment, created_by, imagery_used, source, locale, data_used,
+			hashtags, host, bot, review_requested, changesets_count
+		FROM changesets WHERE id = 100`).
+		Scan(&timestamp, &got.Comment, &got.CreatedBy, &got.ImageryUsed, &got.Source, &got.Locale,
+			&got.DataUsed, &got.Hashtags, &got.Host, &got.Bot, &got.ReviewRequested,
+			&got.ChangesetsCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CreatedAt round-trips through the timestamp column as text, checked
+	// separately below, so it is excluded from this comparison.
+	m.CreatedAt = time.Time{}
+	if got != m {
+		t.Errorf("stored metadata = %+v, want %+v", got, m)
+	}
+	if want := ts(createdAt); timestamp != want {
+		t.Errorf("timestamp = %q, want %q", timestamp, want)
+	}
+
+	// changes_count is never written: see the comment on ChangesetMetadata.
+	if n := count(t, s, `SELECT count(*) FROM changesets WHERE id = 100 AND changes_count IS NULL`); n != 1 {
+		t.Errorf("changes_count rows = %d, want 1 (still NULL)", n)
+	}
+}
+
+func TestQueriesIncludeChangesetMetadata(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) { must(t, tx.Save(el(1, now))) })
+
+	before, err := s.QueryLatest(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || before[0].Comment != nil || before[0].CreatedBy != nil {
+		t.Fatalf("before fetch: comment/created_by = %+v, want both nil", before[0])
+	}
+
+	if err := s.SetChangesetMetadata(100, ChangesetMetadata{CreatedAt: now, Comment: "fixed a wall", CreatedBy: "JOSM"}); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := s.QueryLatest(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("len(after) = %d, want 1", len(after))
+	}
+	if after[0].Comment == nil || *after[0].Comment != "fixed a wall" {
+		t.Errorf("Comment = %v, want fixed a wall", after[0].Comment)
+	}
+	if after[0].CreatedBy == nil || *after[0].CreatedBy != "JOSM" {
+		t.Errorf("CreatedBy = %v, want JOSM", after[0].CreatedBy)
 	}
 }
 

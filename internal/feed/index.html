@@ -454,6 +454,7 @@
             <th>Class</th>
             <th>Name</th>
             <th>User</th>
+            <th>Editor</th>
             <th>Links</th>
         </tr>
         </thead>
@@ -639,7 +640,7 @@
         row.hidden = true;
 
         const td = row.insertCell();
-        td.colSpan = 8;
+        td.colSpan = 9;
 
         const box = document.createElement('div');
         box.className = 'detailbox';
@@ -709,6 +710,9 @@
         // from. Useful when checking the filter, not when reading the change.
         const meta = document.createElement('div');
         meta.className = 'meta';
+        if (c.comment) {
+            meta.append(field('comment', c.comment));
+        }
         if (c.unwanted && c.unwanted.length) {
             meta.append(field('unwanted', c.unwanted.join(', ')));
         }
@@ -843,6 +847,8 @@
         } else {
             who.textContent = '(anonymous)';
         }
+        // Blank until the changeset's OSM API metadata has been fetched.
+        cell(row, c.created_by || '—');
 
         const links = row.insertCell();
         link(links, c.url, c.type + '/' + c.id);

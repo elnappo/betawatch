@@ -34,7 +34,7 @@ The reviewed schema is `SCHEMA.sql`. It will be embedded from
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | BIGINT | PRIMARY KEY |
-| `timestamp` | DATETIME | NOT NULL; earliest element timestamp seen for it |
+| `timestamp` | DATETIME | the changeset's own `created_at`, from the OSM API; NULL until fetched |
 | `uid` | BIGINT | from the diff |
 | `user` | TEXT | from the diff |
 | `comment` | TEXT | why the changes were made; shown as the changeset headline |
@@ -53,10 +53,20 @@ The reviewed schema is `SCHEMA.sql`. It will be embedded from
 | `modified_count` | INTEGER | modified elements |
 | `deleted_count` | INTEGER | deleted elements |
 
-Only `id`, `timestamp`, `uid` and `user` are known from the diffs. The
-rest are NULL. Sources considered for them later: the OSM API
-(`/api/0.6/changeset/ID`) or the changeset replication feed. Neither is
-in scope now.
+Only `id`, `uid` and `user` are known from the diffs. `timestamp` and the
+other metadata columns (`comment` through `changesets_count`) are filled
+in after the fact from the OSM API (`/api/0.6/changeset/ID`, via
+`osm/osmapi`), once per changeset, for every changeset a saved or deleted
+element belongs to. The API always returns `created_at`, so `timestamp
+IS NULL` is also how a fetch still owed is told apart from one already
+done, even for a changeset whose comment (say) turned out genuinely
+empty — no separate "fetched" column needed. `changes_count`,
+`created_count`, `modified_count` and `deleted_count` stay NULL:
+`osm.Changeset.ChangesCount` is tagged `xml:"num_changes"`, the API's old
+attribute name, so it always decodes to 0 against the live API, which now
+sends `changes_count` — worse than NULL, so it is left unwritten. The
+created/modified/deleted breakdown needs the heavier changeset-download
+endpoint regardless. Out of scope for now.
 
 ### `elements` (live, latest version only)
 | Column | Type | Notes |

@@ -6,11 +6,14 @@ Watches OpenStreetMap for climbing-related edits and shows them for review.
 
 ### github.com/paulmach/osm
 
-All OSM parsing and fetching. Two packages are used:
+All OSM parsing and fetching. Three packages are used:
 
 - `osm` — the element types and `osm.Change`, the parsed osmChange file
 - `osm/replication` — `Datasource`, `CurrentMinuteState`, `Minute`,
   `MinuteStateAt`, `NotFound`
+- `osm/osmapi` — `Datasource.Changeset`, one changeset's metadata (comment,
+  created_by, tags, ...) from the REST API. A subpackage of `osm` itself,
+  not a separate module, so it needs no `go.mod`/`go.sum` change.
 
 Notes that took a while to learn:
 
@@ -21,6 +24,9 @@ Notes that took a while to learn:
   everything as a delete.
 - `replication.NotFound(err)` is the check for a diff that is not
   published yet, or a gap in the feed. Both are normal; neither is fatal.
+  `osmapi.Datasource.NotFound(err)` is the equivalent for a changeset
+  fetch, but it is a method, not a package-level function like
+  `replication.NotFound` — easy to reach for the wrong one.
 - `MinuteStateAt` binary-searches the feed and costs 20+ requests. Use it
   to find a range once, not per diff.
 - The package handles gzip itself, so a `.osc.gz` needs no unwrapping.
