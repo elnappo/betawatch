@@ -37,9 +37,8 @@ classify:
     - "indoor=yes"
   natural:
     - "natural=cliff,rock,stone,bare_rock"
-  path:
-    - "path=climbing_access"
-    - "highway=path"
+  topo:
+    - "wikimedia_commons:path*"
   boulder:
     - "climbing=boulder"
     - "climbing:boulder!=no"
@@ -57,6 +56,9 @@ classify:
     - "climbing:aid!=no"
   building:
     - "building"
+  path:
+    - "path=climbing_access"
+    - "highway=path"
 
 unwanted_tags:
   - "climbing!=route,route_bottom,route_top,boulder,crag,area,anchor"
@@ -153,6 +155,6 @@ tag_values_regex:
   - covered: '^yes$'
   - ele: '^[1-9][0-9]*\s?[m]?$'
   - height: '^[1-9][0-9]*\s?[m]?$'
-  - sport: '^climbing$'
+  - sport: '^climbing'
   - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
