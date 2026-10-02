@@ -110,8 +110,10 @@ unwanted_tags:
   - "sport=*rock_climbing"
 
 tag_values_regex:
+  - author: '^[^;]+(?:\s*;\s*(?:\d{1,2}\.\d{1,2}\.\d{4}|\d{1,2}\.\d{4}|\d{4}))?$'
   - climbing: '^(route|route_bottom|route_top|boulder|crag|area|anchor)$'
   - climbing:aid: '^(yes|[1-9][0-9]*)$'
+  - climbing:beginner_friendly: '^yes$'
   - climbing:bolted: '^(yes|[1-9][0-9]*)$'
   - climbing:bolts: '^[1-9][0-9]*$'
   - climbing:boulder: '^(yes|[1-9][0-9]*)$'
@@ -151,6 +153,6 @@ tag_values_regex:
   - covered: '^yes$'
   - ele: '^[1-9][0-9]*\s?[m]?$'
   - height: '^[1-9][0-9]*\s?[m]?$'
-  - sport: '^climbing'
+  - sport: '^climbing$'
   - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
