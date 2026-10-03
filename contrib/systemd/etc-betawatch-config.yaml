@@ -419,3 +419,44 @@ rules:
       AND CAST(tag.value AS TEXT) NOT REGEXP
       '^(?:[34]|5\.(?:1[0-5][a-d]?[+-]?|[0-9][+-]?))(?:\/(?:1[0-5][a-d]?|[/a-d]))?$'
       ORDER BY e.id, e.type;
+  - name: "Invalid length"
+    description: "The climbing:length tag should be a positive number with optional unit 'm'."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:length%'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        "^\d+(?:\.\d+)?(?:\s*[m'])?$"
+      ORDER BY e.id, e.type;
+  - name: "Invalid bolted value"
+    description: "The climbing:bolted tag should be 'yes' or a positive number."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:bolted'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        "^(?:\d+(?:\.\d+)?(?:\s*[m'])?|yes|no|mixed)$"
+      ORDER BY e.id, e.type;
+  - name: "Invalid quality value"
+    description: "The climbing:quality tag should be 'solid', 'fragile', or 'medium'."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:quality'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        '^(solid|fragile|medium|mixed)$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid orientation value"
+    disabled: true
+    description: "The climbing:orientation tag should be a combination of N, S, E, W, separated by semicolons."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:orientation'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        '^[NEWS]{1,3}(?:;[NEWS]{1,3})*$'
+      ORDER BY e.id, e.type;
