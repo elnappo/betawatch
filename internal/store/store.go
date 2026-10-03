@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -53,6 +54,12 @@ type ChangesetMetadata struct {
 // Store is a SQLite database of elements.
 type Store struct {
 	db *sql.DB
+
+	// roDB is a second, read-only connection to the same file, used only
+	// to run operator-authored rule queries (RunRule). SQLite itself
+	// rejects a write through it, so a mistake in a rule's SQL cannot
+	// corrupt the store it is reading.
+	roDB *sql.DB
 }
 
 // Open opens or creates the database at path.
@@ -71,10 +78,28 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
-	return &Store{db: db}, nil
+
+	// mode=ro opens after the schema above has run, so the file already
+	// exists; journal_mode is a database-level setting already fixed by
+	// the read-write connection, so it is not repeated here.
+	roq := url.Values{}
+	roq.Add("_pragma", "busy_timeout(5000)")
+	roq.Add("mode", "ro")
+	roDB, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Opaque: url.PathEscape(path), RawQuery: roq.Encode()}).String())
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db, roDB: roDB}, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	err := s.db.Close()
+	if roErr := s.roDB.Close(); err == nil {
+		err = roErr
+	}
+	return err
+}
 
 // Tx is one transaction. A minute diff is applied in one, so a crash
 // leaves either all of it or none.
@@ -384,6 +409,75 @@ func (s *Store) PreviousVersion(id int64, typ string, version int) (*RecentChang
 		return nil, err
 	}
 	return &changes[0], nil
+}
+
+// RuleMatch is one element a problem rule's query returned.
+type RuleMatch struct {
+	ID   int64
+	Type string
+}
+
+// RunRule executes an operator-authored rule query (see internal/config's
+// Rule) and returns the (id, type) pairs it selected. It runs against
+// roDB, a connection SQLite itself rejects writes on, so a mistake in a
+// rule's SQL cannot corrupt the store it is reading; the query must
+// select exactly two columns, id then type.
+func (s *Store) RunRule(query string) ([]RuleMatch, error) {
+	rows, err := s.roDB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RuleMatch
+	for rows.Next() {
+		var m RuleMatch
+		if err := rows.Scan(&m.ID, &m.Type); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// queryElementsBatch is how many (id, type) pairs go in one query's IN
+// clause. SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999 (2 bind
+// parameters per pair), and a single broad rule can match tens of
+// thousands of elements, so QueryElements must page through its keys
+// rather than bind them all at once.
+const queryElementsBatch = 400
+
+// QueryElements returns the live elements matching the given (id, type)
+// pairs, for turning a rule's raw id/type hits into full records to
+// display. A pair that is not currently live (a rule can point at
+// something since deleted) is silently omitted.
+func (s *Store) QueryElements(keys []RuleMatch) ([]RecentChange, error) {
+	var out []RecentChange
+	for len(keys) > 0 {
+		n := min(len(keys), queryElementsBatch)
+		batch, err := s.queryElementsBatch(keys[:n])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		keys = keys[n:]
+	}
+	return out, nil
+}
+
+func (s *Store) queryElementsBatch(keys []RuleMatch) ([]RecentChange, error) {
+	placeholders := make([]string, len(keys))
+	args := make([]any, 0, len(keys)*2)
+	for i, k := range keys {
+		placeholders[i] = "(?, ?)"
+		args = append(args, k.ID, k.Type)
+	}
+	return scanChanges(s.db.Query(`
+		SELECT `+changesColumns+` FROM (
+			SELECT id, type, version, lat, lon, timestamp, user, uid, changeset_id, tags, 0 AS deleted FROM elements
+		) u `+changesetJoin+`
+		WHERE (u.id, u.type) IN (`+strings.Join(placeholders, ",")+`)
+	`, args...))
 }
 
 // scanChanges reads the rows of a query selecting changesColumns.

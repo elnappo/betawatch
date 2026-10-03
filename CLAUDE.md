@@ -80,6 +80,20 @@ hourly and daily feeds cost the same for the same span. `-backfill`
 limits a first run (2h by default); after that the state file makes
 restarts cheap.
 
+**Problem rules are raw SQL, trusted like `tag_values_regex`.** The
+problems page (`/problems.html`) runs each `rules` entry in config.yaml
+as a literal query against the `elements` table, over a second,
+`?mode=ro` connection (`Store.roDB`): SQLite rejects a write through it,
+so a typo'd rule can't corrupt the store it's reading. That connection
+does not stop `ATTACH DATABASE` to a new file, though — rules are
+operator-authored config, not untrusted input, the same trust level
+`tag_values_regex`'s regexes already have (themselves capable of ReDoS),
+so this is accepted rather than engineered around. A tag key's own colons
+need no escaping in the JSON path (`tags ->> '$.climbing:grade:french'`
+works as written): SQLite reads everything up to the next `.` or `[` as
+the key, so unlike some other JSON-path dialects a colon is never
+special.
+
 ## Facts worth keeping
 
 - About 200 climbing changes a day worldwide, against roughly 4.3 million

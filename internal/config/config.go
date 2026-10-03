@@ -32,6 +32,10 @@ type Config struct {
 	// affect selection.
 	TagValues []TagValueRule `yaml:"tag_values_regex"`
 
+	// Rules are named SQL queries identifying live elements with a
+	// problem, for the problems page. They never affect selection.
+	Rules []Rule `yaml:"rules"`
+
 	// HTTPAddr is the address to serve the web view on (e.g., ":8080").
 	// Empty to disable.
 	HTTPAddr string `yaml:"http_addr"`
@@ -122,7 +126,36 @@ func (c *Config) compile() error {
 			return fmt.Errorf("tag_values_regex %s: %w", r.Key, err)
 		}
 	}
+
+	seen := make(map[string]bool, len(c.Rules))
+	for i, r := range c.Rules {
+		if r.Name == "" {
+			return fmt.Errorf("rules: entry %d has no name", i)
+		}
+		if r.Query == "" {
+			return fmt.Errorf("rules %s: no query", r.Name)
+		}
+		if seen[r.Name] {
+			return fmt.Errorf("rules %s: duplicate name", r.Name)
+		}
+		seen[r.Name] = true
+	}
 	return nil
+}
+
+// Rule is a named SQL query identifying live elements with a problem, for
+// the problems page. Query must return (id, type) columns; anything else
+// is a mistake caught when the query runs against the store, not here,
+// since compiling the config does not open a database connection.
+type Rule struct {
+	Name string `yaml:"name"`
+	// Description explains what the rule looks for, shown as a mouseover
+	// on the rule's badge on the problems page. Optional.
+	Description string `yaml:"description"`
+	Query       string `yaml:"query"`
+	// Disabled skips the rule without deleting it, e.g. while a known-bad
+	// query (one using a SQLite function this build lacks) is fixed.
+	Disabled bool `yaml:"disabled"`
 }
 
 // TagValueRule is one entry of tag_values_regex: a key pattern and the

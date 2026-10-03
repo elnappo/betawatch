@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
 
-//go:embed index.html favicon.svg
+//go:embed index.html problems.html favicon.svg
 var static embed.FS
 
 // HistoryFetcher returns one page of past changes, newest first, each
@@ -33,16 +34,24 @@ type PreviousVersion struct {
 // DiffFetcher looks up the version just before the given one.
 type DiffFetcher func(typ string, id int64, version int) (*PreviousVersion, error)
 
-// NewHandler serves the review page, its history, its SSE stream and its
-// per-element diffs. fetch supplies history pages, diff supplies the
-// previous-version lookups, and the broker supplies the live stream.
-func NewHandler(b *Broker, fetch HistoryFetcher, diff DiffFetcher) http.Handler {
+// ProblemsFetcher runs every configured rule and returns the merged,
+// already-JSON-encoded live elements, each annotated with which rule(s)
+// it broke.
+type ProblemsFetcher func() ([]json.RawMessage, error)
+
+// NewHandler serves the review page, its history, its SSE stream, its
+// per-element diffs and the problems page. fetch supplies history pages,
+// diff supplies the previous-version lookups, problems supplies the
+// problems page's data, and the broker supplies the live stream.
+func NewHandler(b *Broker, fetch HistoryFetcher, diff DiffFetcher, problems ProblemsFetcher) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", http.FileServerFS(static))
+	mux.Handle("GET /problems.html", http.FileServerFS(static))
 	mux.Handle("GET /favicon.svg", http.FileServerFS(static))
 	mux.HandleFunc("GET /robots.txt", serveRobots)
 	mux.HandleFunc("GET /api/changes", serveHistory(fetch))
 	mux.HandleFunc("GET /api/diff", serveDiff(diff))
+	mux.HandleFunc("GET /api/problems", serveProblems(problems))
 	mux.HandleFunc("GET /events", b.serveEvents)
 	return mux
 }
@@ -121,6 +130,29 @@ func serveDiff(diff DiffFetcher) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		json.NewEncoder(w).Encode(prev)
+	}
+}
+
+// serveProblems returns every live element currently flagged by a
+// configured rule.
+func serveProblems(fetch ProblemsFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		problems, err := fetch()
+		if err != nil {
+			// fetch's error names the offending rule and its query (see
+			// cmd/feed's fetchProblems), which is operator-authored SQL:
+			// worth the operator's console, not the browser's.
+			fmt.Fprintf(os.Stderr, "problems: %v\n", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if problems == nil {
+			problems = []json.RawMessage{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(problems)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -326,6 +327,148 @@ func TestFetchDiffOfACreateIsNotFound(t *testing.T) {
 	if prev != nil {
 		t.Errorf("prev = %+v, want nil", prev)
 	}
+}
+
+func TestFetchProblemsMergesMultipleRuleHits(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := openDB(t, climber(1, now))
+
+	cfg := loadConfigWithRules(t, `
+rules:
+  - name: "rule a"
+    query: "SELECT id, type FROM elements WHERE id = 1"
+  - name: "rule b"
+    query: "SELECT id, type FROM elements WHERE id = 1"
+`)
+
+	raw, err := fetchProblems(cfg, db)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 1 {
+		t.Fatalf("len(problems) = %d, want 1", len(raw))
+	}
+	var got problem
+	if err := json.Unmarshal(raw[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	wantRules := []brokenRule{{Name: "rule a"}, {Name: "rule b"}}
+	if !reflect.DeepEqual(got.Rules, wantRules) {
+		t.Errorf("Rules = %+v, want %+v", got.Rules, wantRules)
+	}
+	want := "https://www.openstreetmap.org/edit?editor=id&way=1#comment=Fix+climbing+tags.&hashtags=climbing,betawatch"
+	if got.URL != want {
+		t.Errorf("URL = %q, want %q", got.URL, want)
+	}
+	if !reflect.DeepEqual(got.Tags, map[string]string{"climbing": "crag", "name": "crag"}) {
+		t.Errorf("Tags = %v, want the element's tags", got.Tags)
+	}
+}
+
+func TestEditURL(t *testing.T) {
+	got := editURL("way", 1331899047)
+	want := "https://www.openstreetmap.org/edit?editor=id&way=1331899047#comment=Fix+climbing+tags.&hashtags=climbing,betawatch"
+	if got != want {
+		t.Errorf("editURL() = %q, want %q", got, want)
+	}
+}
+
+func TestFetchProblemsSkipsCleanElements(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := openDB(t, climber(1, now))
+
+	cfg := loadConfigWithRules(t, `
+rules:
+  - name: "never matches"
+    query: "SELECT id, type FROM elements WHERE id = 999"
+`)
+
+	raw, err := fetchProblems(cfg, db)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 0 {
+		t.Errorf("len(problems) = %d, want 0", len(raw))
+	}
+}
+
+func TestFetchProblemsSkipsDisabledRules(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := openDB(t, climber(1, now))
+
+	cfg := loadConfigWithRules(t, `
+rules:
+  - name: "disabled"
+    query: "NOT VALID SQL"
+    disabled: true
+`)
+
+	// A disabled rule's query is never even run, so its invalid SQL must
+	// not surface as an error.
+	raw, err := fetchProblems(cfg, db)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 0 {
+		t.Errorf("len(problems) = %d, want 0", len(raw))
+	}
+}
+
+func TestFetchProblemsIncludesRuleDescription(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := openDB(t, climber(1, now))
+
+	cfg := loadConfigWithRules(t, `
+rules:
+  - name: "rule a"
+    description: "explains rule a"
+    query: "SELECT id, type FROM elements WHERE id = 1"
+`)
+
+	raw, err := fetchProblems(cfg, db)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got problem
+	if err := json.Unmarshal(raw[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []brokenRule{{Name: "rule a", Description: "explains rule a"}}
+	if !reflect.DeepEqual(got.Rules, want) {
+		t.Errorf("Rules = %+v, want %+v", got.Rules, want)
+	}
+}
+
+func TestFetchProblemsPropagatesRuleError(t *testing.T) {
+	db := openDB(t)
+	cfg := loadConfigWithRules(t, `
+rules:
+  - name: "broken"
+    query: "NOT VALID SQL"
+`)
+
+	_, err := fetchProblems(cfg, db)()
+	if err == nil {
+		t.Fatal("expected an error for a broken rule query")
+	}
+	if !strings.Contains(err.Error(), `"broken"`) {
+		t.Errorf("error = %v, want it to name the rule", err)
+	}
+}
+
+// loadConfigWithRules loads testConfig with the given extra YAML appended,
+// so rule-specific tests don't have to restate the select/classify fixture.
+func loadConfigWithRules(t *testing.T, extra string) *config.Config {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte(testConfig+extra), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
 
 func TestFetchHistoryRejectsBadCursor(t *testing.T) {

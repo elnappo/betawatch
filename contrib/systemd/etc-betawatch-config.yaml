@@ -158,3 +158,152 @@ tag_values_regex:
   - sport: '^climbing'
   - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
+
+# Named SQL queries for the problems page (/problems.html), each selecting
+# the (id, type) of live elements with a problem. They run against the
+# "elements" table of the SQLite schema (see internal/store/schema.sql),
+# read-only, and never affect selection or the main feed.
+rules:
+  - name: "missing name"
+    disabled: true
+    description: "All climbing objects should have a name tag."
+    query: >
+      SELECT e.id, e.type
+      FROM elements AS e
+      WHERE e.tags ->> '$.climbing' IN (
+          'route',
+          'route-bottom',
+          'crag',
+          'area',
+          'boulder'
+      )
+        AND (
+            e.tags ->> '$.name' IS NULL
+            OR trim(e.tags ->> '$.name') = ''
+        )
+      ORDER BY e.id, e.type
+  - name: "climbing style invalid value"
+    description: "Climbing style tags e.g. climbing:boulder, climbing:sport, climbing:trad, etc. should have a value of 'yes', 'no', or a positive integer."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e, json_each(e.tags) AS tag
+      WHERE tag.key IN (
+          'climbing:boulder', 'climbing:sport', 'climbing:speed',
+          'climbing:toprope', 'climbing:trad', 'climbing:multipitch',
+          'climbing:ice', 'climbing:mixed', 'climbing:dry',
+          'climbing:aid', 'climbing:deepwater'
+      )
+      AND lower(trim(tag.value)) NOT IN ('yes', 'no', 'limited')
+      AND NOT (
+          json_valid(tag.value)
+          AND json_type(tag.value) IN ('integer', 'real')
+      )
+      ORDER BY e.id, e.type
+  - name: "climbing:pitches not a positive integer"
+    description: "The climbing:pitches tag should be a positive integer."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e,
+           json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:pitches'
+        AND NOT (
+            CAST(tag.value AS TEXT) <> ''
+            AND CAST(tag.value AS TEXT) NOT GLOB '*[^0-9]*'
+            AND CAST(tag.value AS INTEGER) > 0
+        )
+      ORDER BY e.id, e.type
+  - name: "climbing:start invalid value"
+    description: "The climbing:start tag should have a value of 'stand', 'sit', or 'jump'."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e,
+           json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:start'
+        AND lower(trim(CAST(tag.value AS TEXT))) NOT IN ('stand', 'sit', 'jump')
+      ORDER BY e.id, e.type
+  - name: "Route with multiple climbing style"
+    disabled: true
+    description: "A climbing route should not have multiple climbing style tags set to 'yes'."
+    query: >
+      SELECT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE e.tags ->> '$.climbing' IN ('route', 'route-bottom')
+        AND tag.key IN (
+            'climbing:boulder',
+            'climbing:sport',
+            'climbing:speed',
+            'climbing:toprope',
+            'climbing:trad',
+            'climbing:ice',
+            'climbing:mixed',
+            'climbing:dry',
+            'climbing:aid',
+            'climbing:deepwater'
+        )
+        AND lower(trim(CAST(tag.value AS TEXT))) = 'yes'
+      GROUP BY e.id, e.type
+      HAVING COUNT(*) > 1
+      ORDER BY e.id, e.type
+  - name: "Route with invalid climbing style value"
+    description: "A climbing route should only have climbing style tags with a value of 'yes'"
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE e.tags ->> '$.climbing' IN ('route', 'route-bottom')
+        AND tag.key IN (
+            'climbing:boulder',
+            'climbing:sport',
+            'climbing:speed',
+            'climbing:toprope',
+            'climbing:trad',
+            'climbing:ice',
+            'climbing:mixed',
+            'climbing:dry',
+            'climbing:aid',
+            'climbing:deepwater',
+            'climbing:multipitch'
+        )
+        AND lower(trim(CAST(tag.value AS TEXT))) NOT IN ('yes', 'no')
+      ORDER BY e.id, e.type;
+  - name: "Invalid value for yes/no tag"
+    description: "Some climbing tags are yes/no tags and should only have a value of 'yes' or 'no'."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key IN (
+          'climbing:beginner_friendly',
+          'climbing:chipped',
+          'climbing:family_friendly',
+          'climbing:hazard:animal_nest',
+          'climbing:hazard:bad_protection',
+          'climbing:hazard:death_fall_zone',
+          'climbing:hazard:dirty_rock',
+          'climbing:hazard:highball',
+          'climbing:hazard:loose_rock',
+          'climbing:hazard:missing_anchor',
+          'climbing:hazard:rockfall_zone',
+          'climbing:hazard:slippery_rock',
+          'climbing:hazard:unstable_anchor',
+          'climbing:hazard:vegetation',
+          'climbing:hazard:wet',
+          'climbing:inclination:overhang',
+          'climbing:inclination:roof',
+          'climbing:inclination:slab',
+          'climbing:inclination:traverse',
+          'climbing:inclination:vertical',
+          'climbing:summit_log'
+      )
+        AND lower(trim(CAST(tag.value AS TEXT))) NOT IN ('yes', 'no')
+      ORDER BY e.id, e.type
+  - name: "Invalid Wikimedia Commons path"
+    description: "The wikimedia_commons:path tag should start with '0.' don't link images or categories from Wikimedia Commons."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'wikimedia_commons:path'
+        AND trim(CAST(tag.value AS TEXT)) NOT GLOB '0.*'
+      ORDER BY e.id, e.type

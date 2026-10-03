@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, nocache">
+    <title>BetaWatch — Problems</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #1a1a1a;
+            --muted: #666;
+            --line: #e2e2e2;
+            --head: #f6f6f6;
+            --accent: #0a7d3f;
+            --warn: #fdf3e3;
+            --warn-fg: #7a4a0f;
+            --warn-edge: #b7791f;
+            --visited: #e3f6e9;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181c;
+                --fg: #e8e8e8;
+                --muted: #9a9a9a;
+                --line: #2c2f36;
+                --head: #1e2127;
+                --accent: #4ade80;
+                --warn: #33280f;
+                --warn-fg: #e3a53c;
+                --warn-edge: #e3a53c;
+                --visited: #1c3a29;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+        }
+
+        header {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        nav a {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        #count {
+            color: var(--muted);
+            font-size: 13px;
+            margin-left: auto;
+        }
+
+        button#refresh {
+            font: inherit;
+            padding: 3px 10px;
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            background: var(--head);
+            color: var(--fg);
+            cursor: pointer;
+        }
+
+        button#refresh:hover {
+            background: var(--line);
+        }
+
+        .wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            min-width: 560px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 7px 10px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: var(--head);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
+        }
+
+        td.etype {
+            color: var(--muted);
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        th.chev, td.chev {
+            width: 1.6em;
+            padding-right: 0;
+            text-align: center;
+            color: var(--muted);
+            user-select: none;
+        }
+
+        tr.main {
+            cursor: pointer;
+        }
+
+        tr.main:hover {
+            background: var(--head);
+        }
+
+        tr.main.open {
+            background: var(--head);
+        }
+
+        tr.detail > td {
+            padding: 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .detailbox {
+            padding: 12px 14px 12px 38px;
+            background: var(--head);
+        }
+
+        table.tags {
+            width: auto;
+            min-width: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12.5px;
+        }
+
+        table.tags td {
+            padding: 2px 8px 2px 0;
+            border: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            vertical-align: top;
+        }
+
+        table.tags td.k {
+            color: var(--muted);
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px solid var(--line);
+        }
+
+        a:hover {
+            border-bottom-color: currentColor;
+        }
+
+        /* A row whose edit link has been clicked, so a reviewer can tell
+           what they've already acted on without the list changing shape
+           (an edit on OSM only disappears here once ingest sees it). */
+        tr.main.visited > td {
+            background: var(--visited);
+        }
+
+        tr.main.visited:hover > td, tr.main.visited.open > td {
+            background: var(--visited);
+            filter: brightness(0.96);
+        }
+
+        tr.main.visited td.link a {
+            font-weight: 600;
+        }
+
+        tr.main.visited td.link a::after {
+            content: " ✓";
+        }
+
+        .badge {
+            display: inline-block;
+            margin: 1px 4px 1px 0;
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--warn);
+            color: var(--warn-fg);
+            box-shadow: inset 2px 0 0 var(--warn-edge);
+        }
+
+        #empty, #error {
+            color: var(--muted);
+            padding: 24px 10px;
+        }
+
+        #error {
+            color: #d14;
+        }
+
+        footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            align-items: center;
+            margin-top: 28px;
+            padding-top: 14px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 12.5px;
+        }
+
+        footer a {
+            color: inherit;
+        }
+
+        footer a:hover {
+            color: var(--fg);
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>BetaWatch — Problems</h1>
+    <nav><a href="./">live feed</a></nav>
+    <span id="count"></span>
+    <button id="refresh" type="button">Refresh</button>
+</header>
+
+<div class="wrap">
+    <table>
+        <thead>
+        <tr>
+            <th class="chev"></th>
+            <th>Type</th>
+            <th>Name</th>
+            <th>Rules broken</th>
+            <th>Edit link</th>
+        </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+    </table>
+</div>
+<div id="empty" hidden>No problems found — every live element passes every rule.</div>
+<div id="error" hidden></div>
+
+<footer>
+    <a href="https://github.com/elnappo/betawatch/" target="_blank" rel="noopener">
+        <!-- GitHub's own mark, inlined: the page loads nothing external. -->
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+        1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+        0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2
+        .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
+        3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+        </svg>
+        github.com/elnappo/betawatch
+    </a>
+    <span>
+    Data from <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>
+    contributors, available under the
+    <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>.
+  </span>
+</footer>
+
+<script>
+    const rows = document.getElementById('rows');
+    const countEl = document.getElementById('count');
+    const emptyEl = document.getElementById('empty');
+    const errorEl = document.getElementById('error');
+    const refreshBtn = document.getElementById('refresh');
+
+    const cell = (row, text, cls) => {
+        const td = row.insertCell();
+        if (cls) td.className = cls;
+        td.textContent = text ?? '';
+        return td;
+    };
+
+    // detailRow builds the hidden row holding the element's full tag set,
+    // built lazily so a row that is never opened costs nothing.
+    function detailRow(p) {
+        const row = document.createElement('tr');
+        row.className = 'detail';
+        row.hidden = true;
+
+        const td = row.insertCell();
+        td.colSpan = 5;
+
+        const box = document.createElement('div');
+        box.className = 'detailbox';
+
+        const tags = p.tags || {};
+        const keys = Object.keys(tags).sort();
+        if (keys.length) {
+            const table = document.createElement('table');
+            table.className = 'tags';
+            for (const k of keys) {
+                const tr = table.insertRow();
+                const kt = tr.insertCell();
+                kt.className = 'k';
+                kt.textContent = k;
+                tr.insertCell().textContent = tags[k];
+            }
+            box.append(table);
+        } else {
+            box.append('(no tags)');
+        }
+
+        td.append(box);
+        return row;
+    }
+
+    function addRow(p) {
+        const row = rows.insertRow();
+        row.className = 'main';
+        cell(row, '▸', 'chev');
+        cell(row, p.type, 'etype');
+        cell(row, p.name || '—');
+
+        const rulesTd = row.insertCell();
+        for (const rule of p.rules || []) {
+            const b = document.createElement('span');
+            b.className = 'badge';
+            b.textContent = rule.name;
+            if (rule.description) b.title = rule.description;
+            rulesTd.append(b);
+        }
+
+        const link = row.insertCell();
+        link.className = 'link';
+        const a = document.createElement('a');
+        a.href = p.url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = p.type + '/' + p.id;
+        a.addEventListener('click', () => row.classList.add('visited'));
+        link.append(a);
+
+        const detail = detailRow(p);
+        row.after(detail);
+
+        row.addEventListener('click', e => {
+            // Let the edit link work without also toggling the row.
+            if (e.target.closest('a')) return;
+            detail.hidden = !detail.hidden;
+            row.classList.toggle('open', !detail.hidden);
+            row.cells[0].textContent = detail.hidden ? '▸' : '▾';
+        });
+    }
+
+    async function load() {
+        refreshBtn.disabled = true;
+        errorEl.hidden = true;
+        emptyEl.hidden = true;
+        rows.replaceChildren();
+        countEl.textContent = 'loading…';
+        try {
+            const res = await fetch('api/problems');
+            if (!res.ok) throw new Error('server returned ' + res.status);
+            const problems = await res.json();
+            for (const p of problems) addRow(p);
+            countEl.textContent = problems.length + (problems.length === 1 ? ' problem' : ' problems');
+            emptyEl.hidden = problems.length !== 0;
+        } catch (err) {
+            console.error('problems', err);
+            countEl.textContent = '';
+            errorEl.textContent = 'Failed to load: ' + err.message;
+            errorEl.hidden = false;
+        } finally {
+            refreshBtn.disabled = false;
+        }
+    }
+
+    refreshBtn.addEventListener('click', load);
+    load();
+</script>
+</body>
+</html>

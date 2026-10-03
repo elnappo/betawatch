@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -63,7 +64,7 @@ func run(ctx context.Context, configPath string) error {
 	var broker *feed.Broker
 	if cfg.HTTPAddr != "" {
 		broker = feed.New()
-		if err := serve(ctx, cfg.HTTPAddr, broker, fetchHistory(cfg, db), fetchDiff(db)); err != nil {
+		if err := serve(ctx, cfg.HTTPAddr, broker, fetchHistory(cfg, db), fetchDiff(db), fetchProblems(cfg, db)); err != nil {
 			return err
 		}
 	}
@@ -128,12 +129,12 @@ func latestTimestamp(db *store.Store) (time.Time, error) {
 }
 
 // serve starts the web view in the background.
-func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.HistoryFetcher, diff feed.DiffFetcher) error {
+func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.HistoryFetcher, diff feed.DiffFetcher, problems feed.ProblemsFetcher) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", addr, err)
 	}
-	srv := &http.Server{Handler: feed.NewHandler(broker, fetch, diff)}
+	srv := &http.Server{Handler: feed.NewHandler(broker, fetch, diff, problems)}
 
 	go func() {
 		<-ctx.Done()
@@ -238,6 +239,88 @@ func fetchDiff(db *store.Store) feed.DiffFetcher {
 		}
 		return &feed.PreviousVersion{Found: true, Tags: prev.Tags, Lat: prev.Lat, Lon: prev.Lon}, nil
 	}
+}
+
+// fetchProblems returns a ProblemsFetcher that runs every enabled
+// configured rule, merges hits by (id, type), and returns one problem per
+// element with every rule it matched — an element breaking two rules is
+// shown once, not twice. A rule with Disabled set is skipped entirely.
+func fetchProblems(cfg *config.Config, db *store.Store) feed.ProblemsFetcher {
+	return func() ([]json.RawMessage, error) {
+		brokenBy := make(map[store.RuleMatch][]brokenRule)
+		var order []store.RuleMatch // first-seen order, for stable output
+		for _, r := range cfg.Rules {
+			if r.Disabled {
+				continue
+			}
+			matches, err := db.RunRule(r.Query)
+			if err != nil {
+				return nil, fmt.Errorf("rule %q (query: %s): %w", r.Name, r.Query, err)
+			}
+			for _, m := range matches {
+				if _, ok := brokenBy[m]; !ok {
+					order = append(order, m)
+				}
+				brokenBy[m] = append(brokenBy[m], brokenRule{Name: r.Name, Description: r.Description})
+			}
+		}
+		if len(order) == 0 {
+			return nil, nil
+		}
+
+		elements, err := db.QueryElements(order)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]json.RawMessage, 0, len(elements))
+		for _, e := range elements {
+			elemType := typeToString(e.Type)
+			data, err := json.Marshal(problem{
+				Type:  elemType,
+				ID:    e.ID,
+				Name:  e.Name,
+				Tags:  e.Tags,
+				Rules: brokenBy[store.RuleMatch{ID: e.ID, Type: e.Type}],
+				URL:   editURL(elemType, e.ID),
+			})
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, data)
+		}
+		return out, nil
+	}
+}
+
+// brokenRule is one rule an element broke, with the description shown as
+// a mouseover on the problems page's badge for it.
+type brokenRule struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// problem is one live element flagged by at least one rule.
+type problem struct {
+	Type  string            `json:"type"`
+	ID    int64             `json:"id"`
+	Name  string            `json:"name,omitempty"`
+	Tags  map[string]string `json:"tags"`
+	URL   string            `json:"url"`
+	Rules []brokenRule      `json:"rules"`
+}
+
+// editComment is the changeset comment iD prefills when opened via
+// editURL. Built with url.QueryEscape rather than a literal %-encoded
+// string: a literal "%20" in a fmt format string is read as a verb
+// ("%2" followed by "0"), not a percent-sign.
+var editComment = url.QueryEscape("Fix climbing tags.")
+
+// editURL points at the iD editor with the element preloaded, a changeset
+// comment and the hashtags iD prefills into the changeset, so acting on a
+// problem goes straight to a fix rather than a read-only element page.
+func editURL(elemType string, id int64) string {
+	return fmt.Sprintf("https://www.openstreetmap.org/edit?editor=id&%s=%d#comment=%s&hashtags=climbing,betawatch",
+		elemType, id, editComment)
 }
 
 // stringToType converts full element type names, as sent by the browser,

@@ -342,6 +342,85 @@ func TestBadRegexFailsToLoad(t *testing.T) {
 	}
 }
 
+func TestRulesLoad(t *testing.T) {
+	c := loadString(t, `
+select: [climbing]
+rules:
+  - name: "missing name"
+    query: "SELECT id, type FROM elements WHERE tags ->> '$.name' IS NULL"
+  - name: "bad grade"
+    query: "SELECT id, type FROM elements WHERE tags ->> '$.climbing' = 'x'"
+`)
+	if len(c.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2", len(c.Rules))
+	}
+	if c.Rules[0].Name != "missing name" || c.Rules[1].Name != "bad grade" {
+		t.Errorf("rules = %+v, want names in declared order", c.Rules)
+	}
+}
+
+func TestRulesLoadDescriptionAndDisabled(t *testing.T) {
+	c := loadString(t, `
+select: [climbing]
+rules:
+  - name: "missing name"
+    description: "flags elements with no name tag"
+    query: "SELECT id, type FROM elements WHERE tags ->> '$.name' IS NULL"
+    disabled: true
+  - name: "bad grade"
+    query: "SELECT id, type FROM elements WHERE tags ->> '$.climbing' = 'x'"
+`)
+	if c.Rules[0].Description != "flags elements with no name tag" {
+		t.Errorf("Description = %q, want the configured text", c.Rules[0].Description)
+	}
+	if !c.Rules[0].Disabled {
+		t.Error("Disabled = false, want true")
+	}
+	if c.Rules[1].Disabled {
+		t.Error("Disabled = true, want false: not set in the config")
+	}
+}
+
+func TestRuleNameRequired(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	body := "select: [climbing]\nrules:\n  - query: \"SELECT id, type FROM elements\"\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("Load succeeded, want an error for a rule with no name")
+	}
+}
+
+func TestRuleQueryRequired(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	body := "select: [climbing]\nrules:\n  - name: \"no query\"\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("Load succeeded, want an error for a rule with no query")
+	}
+}
+
+func TestRuleDuplicateNameFails(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	body := `
+select: [climbing]
+rules:
+  - name: "dup"
+    query: "SELECT id, type FROM elements"
+  - name: "dup"
+    query: "SELECT id, type FROM elements"
+`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("Load succeeded, want an error for a duplicate rule name")
+	}
+}
+
 // The config the command actually ships must load and its patterns must
 // compile.
 func TestShippedConfigRegexesCompile(t *testing.T) {

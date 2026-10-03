@@ -486,6 +486,113 @@ func must(t *testing.T, err error) {
 	}
 }
 
+func TestRunRuleReturnsMatches(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+	})
+
+	got, err := s.RunRule(`SELECT id, type FROM elements WHERE tags ->> '$.sport' = 'climbing'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != (RuleMatch{ID: 1, Type: Node}) {
+		t.Errorf("RunRule() = %+v, want one match of id 1, type node", got)
+	}
+}
+
+func TestRunRuleRejectsWrites(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+	})
+
+	if _, err := s.RunRule(`DELETE FROM elements`); err == nil {
+		t.Error("RunRule(DELETE) succeeded, want an error: rule queries must not be able to write")
+	}
+	if n := count(t, s, `SELECT count(*) FROM elements`); n != 1 {
+		t.Errorf("elements count = %d after a rejected write, want 1 (untouched)", n)
+	}
+}
+
+func TestRunRuleBadSQLReturnsError(t *testing.T) {
+	s := open(t)
+	if _, err := s.RunRule(`NOT VALID SQL`); err == nil {
+		t.Error("RunRule(bad SQL) succeeded, want an error")
+	}
+}
+
+func TestQueryElementsFiltersToRequestedKeys(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		must(t, tx.Save(Element{
+			ID: 2, Type: Node, Version: 1, UID: 7, User: "u",
+			Timestamp: now, Changeset: 100, Tags: map[string]string{"sport": "climbing"},
+		}))
+	})
+
+	got, err := s.QueryElements([]RuleMatch{{ID: 1, Type: Node}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Errorf("QueryElements() = %+v, want just element 1", got)
+	}
+}
+
+// TestQueryElementsBeyondSQLiteVariableLimit guards against a real bug: a
+// single query binding two parameters per key hits SQLite's default
+// SQLITE_MAX_VARIABLE_NUMBER (999) well before a broad rule's match count,
+// which can run into the tens of thousands.
+func TestQueryElementsBeyondSQLiteVariableLimit(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	const n = 1000
+	apply(t, s, func(tx *Tx) {
+		for i := int64(1); i <= n; i++ {
+			e := el(1, now)
+			e.ID = i
+			must(t, tx.Save(e))
+		}
+	})
+
+	keys := make([]RuleMatch, n)
+	for i := range keys {
+		keys[i] = RuleMatch{ID: int64(i + 1), Type: Node}
+	}
+
+	got, err := s.QueryElements(keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != n {
+		t.Errorf("len(QueryElements()) = %d, want %d", len(got), n)
+	}
+}
+
+func TestQueryElementsOmitsDeletedOrUnknown(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	apply(t, s, func(tx *Tx) {
+		must(t, tx.Save(el(1, now)))
+		if _, err := tx.Delete(delEl(1, Node, 2, now.Add(time.Minute))); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	got, err := s.QueryElements([]RuleMatch{{ID: 1, Type: Node}, {ID: 999, Type: Node}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("QueryElements() = %+v, want none: 1 is deleted, 999 was never stored", got)
+	}
+}
+
 func TestOpenPathWithSpecialCharacters(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a b#c")
 	if err := os.Mkdir(dir, 0o755); err != nil {
