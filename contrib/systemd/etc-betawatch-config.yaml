@@ -20,7 +20,7 @@ ingest_state_path: "/var/lib/betawatch/ingest-state.json"
 
 # How far back to catch up on first run (e.g., "2h", "6h", "24h").
 # Read by betawatch-ingest.
-backfill_duration: "24h"
+backfill_duration: "168h"
 
 # Descriptive labels for a selected object. These never affect selection,
 # and an object can carry several.

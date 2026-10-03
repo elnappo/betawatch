@@ -210,12 +210,13 @@
             box-shadow: inset 2px 0 0 var(--warn-edge);
         }
 
-        #empty, #error {
+        td.message {
             color: var(--muted);
             padding: 24px 10px;
+            text-align: center;
         }
 
-        #error {
+        td.message.error {
             color: #d14;
         }
 
@@ -262,8 +263,6 @@
         <tbody id="rows"></tbody>
     </table>
 </div>
-<div id="empty" hidden>No problems found — every live element passes every rule.</div>
-<div id="error" hidden></div>
 
 <footer>
     <a href="https://github.com/elnappo/betawatch/" target="_blank" rel="noopener">
@@ -288,8 +287,6 @@
 <script>
     const rows = document.getElementById('rows');
     const countEl = document.getElementById('count');
-    const emptyEl = document.getElementById('empty');
-    const errorEl = document.getElementById('error');
     const refreshBtn = document.getElementById('refresh');
 
     const cell = (row, text, cls) => {
@@ -298,6 +295,16 @@
         td.textContent = text ?? '';
         return td;
     };
+
+    // message replaces the table body with a single centered row, for the
+    // loading, empty and error states — so the table never looks blank
+    // while something is happening or nothing was found.
+    function message(text, cls) {
+        rows.replaceChildren();
+        const row = rows.insertRow();
+        const td = cell(row, text, 'message' + (cls ? ' ' + cls : ''));
+        td.colSpan = 5;
+    }
 
     // detailRow builds the hidden row holding the element's full tag set,
     // built lazily so a row that is never opened costs nothing.
@@ -373,22 +380,23 @@
 
     async function load() {
         refreshBtn.disabled = true;
-        errorEl.hidden = true;
-        emptyEl.hidden = true;
-        rows.replaceChildren();
         countEl.textContent = 'loading…';
+        message('Loading problems…');
         try {
             const res = await fetch('api/problems');
             if (!res.ok) throw new Error('server returned ' + res.status);
             const problems = await res.json();
-            for (const p of problems) addRow(p);
+            if (problems.length) {
+                rows.replaceChildren();
+                for (const p of problems) addRow(p);
+            } else {
+                message('No problems found — every live element passes every rule.');
+            }
             countEl.textContent = problems.length + (problems.length === 1 ? ' problem' : ' problems');
-            emptyEl.hidden = problems.length !== 0;
         } catch (err) {
             console.error('problems', err);
             countEl.textContent = '';
-            errorEl.textContent = 'Failed to load: ' + err.message;
-            errorEl.hidden = false;
+            message('Failed to load: ' + err.message, 'error');
         } finally {
             refreshBtn.disabled = false;
         }
