@@ -4,13 +4,16 @@ package store
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
+	"modernc.org/sqlite"
 	_ "modernc.org/sqlite"
 )
 
@@ -23,6 +26,26 @@ const (
 	Way      = "w"
 	Relation = "r"
 )
+
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction(
+		"regexp",
+		2,
+		func(
+			_ *sqlite.FunctionContext,
+			args []driver.Value,
+		) (driver.Value, error) {
+			if args[0] == nil || args[1] == nil {
+				return false, nil
+			}
+
+			pattern := fmt.Sprint(args[0])
+			value := fmt.Sprint(args[1])
+
+			return regexp.MatchString(pattern, value)
+		},
+	)
+}
 
 // Element is one version of a node, way or relation.
 type Element struct {

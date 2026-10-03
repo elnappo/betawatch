@@ -126,20 +126,20 @@ tag_values_regex:
   - climbing:grade:aid: '^A[0-5]$'
   - climbing:grade:dry: '^D(?:1[0-9]|[1-9])[+-]?(?:\/D(?:1[0-9]|[1-9])[+-]?)?$'
   - climbing:grade:ewbank: '^(?:[1-4][0-9]|[1-9])(?:\/(?:[1-4][0-9]|[1-9]))?$'
-  - climbing:grade:fb: '^(?:[6-9][A-C]\+?|[1-5])(?:\/(?:[6-9][A-C]\+?|[1-5]))?$'
-  - climbing:grade:font: '^(?:[6-9][A-C]\+?|[1-5])(?:\/(?:[6-9][A-C]\+?|[1-5]))?$'
+  - climbing:grade:fb: '^(?:[6-9][A-C]\+?|[1-5]\+?)(?:\/(?:[6-9][A-C]\+?|[1-5]\+?))?$'
+  - climbing:grade:font: '^(?:[6-9][A-C]\+?|[1-5]\+?)(?:\/(?:[6-9][A-C]\+?|[1-5]\+?))?$'
   - climbing:grade:french: '^(?:[1-3]|[4-9][a-c]\+?)(?:\/(?:[1-3]|[4-9][a-c]\+?))?$'
   - climbing:grade:hueco: '^(?:VB[|-]?|V0[+-]?|V[1-9]\d?)(?:\/(?:VB[|-]?|V0[+-]?|V[1-9]\d?))?$'
   - climbing:grade:ice: '^WI[1-7][+-]?(?:\/WI[1-7][+-]?)?$'
   - climbing:grade:mixed: '^M(?:1[0-9]|[1-9])[+-]?(?:\/M(?:1[0-9]|[1-9])[+-]?)?$'
   - climbing:grade:uiaa: '^(?:1[0-3]|[1-9])[+-]?(?:\/(?:1[0-3]|[1-9])[+-]?)?$'
-  - climbing:grade:yds_class: '^5\.(?:1[0-5][a-d]?|[0-9])(?:\/5\.(?:1[0-5][a-d]?|[0-9]))?$'
+  - climbing:grade:yds_class: '^(?:[34]|5\.(?:1[0-5][a-d]?[+-]?|[0-9][+-]?))(?:\/(?:1[0-5][a-d]?|[/a-d]))?$'
   - climbing:guidebook*: '^(?:ISBN(?:-10)?:?\s*)?(?:[0-9]{1,5}[-\s]?[0-9]+[-\s]?[0-9]+[-\s]?[0-9X])$|^(?:ISBN(?:-13)?:?\s*)?(?:97[89][-\s]?[0-9]{1,5}[-\s]?[0-9]+[-\s]?[0-9]+[-\s]?[0-9])$'
   - climbing:hazard:*: '^yes$'
   - climbing:ice: '^(yes|[1-9][0-9]*)$'
   - climbing:inclination:*: '^yes$'
   - climbing:kids: '^yes$'
-  - climbing:length: '^[1-9][0-9]*\s?[m]?$'
+  - climbing:length: '^[1-9][0-9]*(?:\.[0-9]{1,2})?\s?[m]?$'
   - climbing:mixed: '^(yes|[1-9][0-9]*)$'
   - climbing:multipitch: '^(yes|[1-9][0-9]*)$'
   - climbing:orientation: '^[SENW;]+$'
@@ -153,8 +153,8 @@ tag_values_regex:
   - climbing:trad: '^(yes|[1-9][0-9]*)$'
   - climbing:url:*: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - covered: '^yes$'
-  - ele: '^[1-9][0-9]*\s?[m]?$'
-  - height: '^[1-9][0-9]*\s?[m]?$'
+  - ele: '^[1-9][0-9]*(?:\.[0-9]{1,2})?\s?[m]?$'
+  - height: '^[1-9][0-9]*(?:\.[0-9]{1,2})?\s?[m]?$'
   - sport: '^climbing'
   - url: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
   - website: '^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,63}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$'
@@ -307,3 +307,115 @@ rules:
       WHERE tag.key = 'wikimedia_commons:path'
         AND trim(CAST(tag.value AS TEXT)) NOT GLOB '0.*'
       ORDER BY e.id, e.type
+  - name: "Invalid Aid Grade"
+    description: "The climbing:grade:aid tag should be a valid aid grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:aid%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP '^A[0-5]$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Dry Tooling Grade"
+    description: "The climbing:grade:dry tag should be a valid dry tooling grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:dry%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^D(?:1[0-9]|[1-9])[+-]?(?:\/D(?:1[0-9]|[1-9])[+-]?)?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Ewbank Grade"
+    description: "The climbing:grade:ewbank tag should be a valid Ewbank grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:ewbank%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:[1-4][0-9]|[1-9])(?:\/(?:[1-4][0-9]|[1-9]))?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Fontainebleau Grade"
+    description: "The climbing:grade:fb tag should be a valid Fontainebleau grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:fb%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:[1-9][A-C]\+?|[1-5]\+?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Font Grade"
+    description: "The climbing:grade:font tag should be a valid Font grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:font%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:[1-9][A-C]\+?|[1-5]\+?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid French Grade"
+    # Way to many errors because mixed with font grades. Where 5+ is also allowed.
+    disabled: true
+    description: "The climbing:grade:french tag should be a valid French grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:french%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:[1-9][a-c]\+?|[1-3]\+?)(?:\/(?:[1-9][a-c]\+?|[1-3]\+?))?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Hueco Grade"
+    description: "The climbing:grade:hueco tag should be a valid Hueco grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:hueco%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:VB[|-]?|V0[+-]?|V[1-9]\d?)(?:\/(?:VB[|-]?|V0[+-]?|V[1-9]\d?))?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Ice Grade"
+    description: "The climbing:grade:ice tag should be a valid ice grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:ice%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^WI[1-7][+-]?(?:\/WI[1-7][+-]?)?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid Mixed Grade"
+    description: "The climbing:grade:mixed tag should be a valid mixed grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:mixed%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^M(?:1[0-9]|[1-9])[+-]?(?:\/M(?:1[0-9]|[1-9])[+-]?)?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid UIAA Grade"
+    disabled: true
+    description: "The climbing:grade:uiaa tag should be a valid UIAA grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:uiaa%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:1[0-3]|[1-9])[+-]?(?:\/(?:1[0-3]|[1-9])[+-]?)?$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid YDS Class Grade"
+    description: "The climbing:grade:yds_class tag should be a valid YDS class grade."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key LIKE 'climbing:grade:yds_class%'
+      AND CAST(tag.value AS TEXT) NOT REGEXP
+      '^(?:[34]|5\.(?:1[0-5][a-d]?[+-]?|[0-9][+-]?))(?:\/(?:1[0-5][a-d]?|[/a-d]))?$'
+      ORDER BY e.id, e.type;
