@@ -376,7 +376,7 @@ rules:
       JOIN json_each(e.tags) AS tag
       WHERE tag.key LIKE 'climbing:grade:hueco%'
       AND CAST(tag.value AS TEXT) NOT REGEXP
-      '^(?:VB[|-]?|V0[+-]?|V[1-9]\d?)(?:\/(?:VB[|-]?|V0[+-]?|V[1-9]\d?))?$'
+      '^(?:VB[|-]?|V0[+-]?|V[1-9]\d?\+?)(?:\/(?:VB[|-]?|V0[+-]?|V[1-9]\d?))?$'
       ORDER BY e.id, e.type;
   - name: "Invalid Ice Grade"
     description: "The climbing:grade:ice tag should be a valid ice grade."
