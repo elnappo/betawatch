@@ -313,7 +313,7 @@ rules:
       SELECT DISTINCT e.id, e.type
       FROM elements AS e
       JOIN json_each(e.tags) AS tag
-      WHERE tag.key LIKE 'climbing:grade:aid%'
+      WHERE tag.key = 'climbing:grade:aid'
       AND CAST(tag.value AS TEXT) NOT REGEXP '^A[0-5]$'
       ORDER BY e.id, e.type;
   - name: "Invalid Dry Tooling Grade"
@@ -344,7 +344,7 @@ rules:
       JOIN json_each(e.tags) AS tag
       WHERE tag.key LIKE 'climbing:grade:fb%'
       AND CAST(tag.value AS TEXT) NOT REGEXP
-      '^(?:[1-9][A-C]\+?|[1-5]\+?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
+      '^(?:[1-9][A-C]\+?|[1-5]\+?\-?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
       ORDER BY e.id, e.type;
   - name: "Invalid Font Grade"
     description: "The climbing:grade:font tag should be a valid Font grade."
@@ -354,7 +354,7 @@ rules:
       JOIN json_each(e.tags) AS tag
       WHERE tag.key LIKE 'climbing:grade:font%'
       AND CAST(tag.value AS TEXT) NOT REGEXP
-      '^(?:[1-9][A-C]\+?|[1-5]\+?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
+      '^(?:[1-9][A-C]\+?|[1-5]\+?\-?)(?:\/(?:[1-9][A-C]\+?|[1-5]\+?))?$'
       ORDER BY e.id, e.type;
   - name: "Invalid French Grade"
     # Way to many errors because mixed with font grades. Where 5+ is also allowed.
@@ -459,4 +459,14 @@ rules:
       WHERE tag.key = 'climbing:orientation'
         AND CAST(tag.value AS TEXT) NOT REGEXP
         '^[NEWS]{1,3}(?:;[NEWS]{1,3})*$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid bolts value"
+    description: "The climbing:bolts tag should be a positive integer."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:bolts'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        '^(?:[0-9]*|yes)$'
       ORDER BY e.id, e.type;
