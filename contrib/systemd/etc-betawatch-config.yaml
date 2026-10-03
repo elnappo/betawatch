@@ -73,6 +73,7 @@ unwanted_tags:
   - "climbing:descent"
   - "climbing:feature=summit_log"
   - "climbing:fee"
+  - "climbing:grade"
   - "climbing:grade:fb"
   - "climbing:grade:fontainebleau"
   - "climbing:indoor"
@@ -399,7 +400,7 @@ rules:
       '^M(?:1[0-9]|[1-9])[+-]?(?:\/M(?:1[0-9]|[1-9])[+-]?)?$'
       ORDER BY e.id, e.type;
   - name: "Invalid UIAA Grade"
-    disabled: true
+    # TODO Don't allow ? as value
     description: "The climbing:grade:uiaa tag should be a valid UIAA grade."
     query: >
       SELECT DISTINCT e.id, e.type
@@ -407,7 +408,7 @@ rules:
       JOIN json_each(e.tags) AS tag
       WHERE tag.key LIKE 'climbing:grade:uiaa%'
       AND CAST(tag.value AS TEXT) NOT REGEXP
-      '^(?:1[0-3]|[1-9])[+-]?(?:\/(?:1[0-3]|[1-9])[+-]?)?$'
+      '^(?:(?:1[0-3]|[1-9])[+-]?|\?)(?:\/(?:(?:1[0-3]|[1-9])[+-]?|\?))?$'
       ORDER BY e.id, e.type;
   - name: "Invalid YDS Class Grade"
     description: "The climbing:grade:yds_class tag should be a valid YDS class grade."
@@ -459,6 +460,38 @@ rules:
       WHERE tag.key = 'climbing:orientation'
         AND CAST(tag.value AS TEXT) NOT REGEXP
         '^[NEWS]{1,3}(?:;[NEWS]{1,3})*$'
+      ORDER BY e.id, e.type;
+  - name: "Invalid bolts value"
+    description: "The climbing:bolts tag should be a positive integer."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      JOIN json_each(e.tags) AS tag
+      WHERE tag.key = 'climbing:bolts'
+        AND CAST(tag.value AS TEXT) NOT REGEXP
+        '^(?:[0-9]*|yes)$'
+      ORDER BY e.id, e.type;
+  - name: "Missing style while grade present"
+    description: "A climbing route should have a climbing style tag if it has a climbing grade tag."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      WHERE (
+          json_type(tags, '$."climbing:grade:ice"') IS NOT NULL
+              AND COALESCE(json_extract(tags, '$."climbing:ice"'), '') <> 'yes'
+          ) OR (
+          json_type(tags, '$."climbing:grade:dry"') IS NOT NULL
+              AND COALESCE(json_extract(tags, '$."climbing:dry"'), '') <> 'yes'
+          ) OR (
+          json_type(tags, '$."climbing:grade:mixed"') IS NOT NULL
+              AND COALESCE(json_extract(tags, '$."climbing:mixed"'), '') <> 'yes'
+          ) OR (
+          json_type(tags, '$."climbing:grade:font"') IS NOT NULL
+              AND COALESCE(json_extract(tags, '$."climbing:boulder"'), '') <> 'yes'
+          ) OR (
+          json_type(tags, '$."climbing:grade:fb"') IS NOT NULL
+              AND COALESCE(json_extract(tags, '$."climbing:boulder"'), '') <> 'yes'
+          )
       ORDER BY e.id, e.type;
   - name: "Invalid bolts value"
     description: "The climbing:bolts tag should be a positive integer."
