@@ -493,13 +493,33 @@ rules:
               AND COALESCE(json_extract(tags, '$."climbing:boulder"'), '') <> 'yes'
           )
       ORDER BY e.id, e.type;
-  - name: "Invalid bolts value"
-    description: "The climbing:bolts tag should be a positive integer."
+  - name: "Invalid number of routes"
+    description: "The climbing:routes tag should be a positive integer."
     query: >
       SELECT DISTINCT e.id, e.type
       FROM elements AS e
       JOIN json_each(e.tags) AS tag
-      WHERE tag.key = 'climbing:bolts'
+      WHERE tag.key = 'climbing:routes'
         AND CAST(tag.value AS TEXT) NOT REGEXP
-        '^(?:[0-9]*|yes)$'
+        '^[1-9][0-9]*$'
+      ORDER BY e.id, e.type;
+  - name: "Pitches tag present but not a multipitch route"
+    disabled: true
+    description: "A climbing route should have climbing:multipitch=yes when climbing:pitches tag is present."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e
+      WHERE json_extract(tags, '$.climbing') IN ('route', 'route-bottom')
+        AND json_type(tags, '$."climbing:pitches"') IS NOT NULL
+        AND json_type(tags, '$."climbing:multipitch"') IS NULL
+      ORDER BY e.id, e.type;
+  - name: "Wrong pitches field"
+    disabled: false
+    description: "A climbing route should have a climbing:pitches tag with a positive integer value not in climbing:multipitch."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements AS e, json_each(e.tags) AS tag
+      WHERE json_extract(e.tags, '$.climbing') IN ('route', 'route-bottom')
+        AND tag.key = 'climbing:multipitch'
+        AND tag.value REGEXP '^[0-9]+$'
       ORDER BY e.id, e.type;
