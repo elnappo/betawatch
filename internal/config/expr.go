@@ -55,7 +55,7 @@ func ParseExpr(s string) (Expr, error) {
 			key = key[:len(key)-1]
 		}
 		e.key = key
-		for _, v := range strings.Split(vals, ",") {
+		for v := range strings.SplitSeq(vals, ",") {
 			e.values = append(e.values, strings.TrimSpace(v))
 		}
 	} else {
@@ -139,7 +139,7 @@ func (e Expr) tagMatches(k, v string) bool {
 // valueMatches compares against each ";"-separated part, since OSM uses
 // that to hold several values in one tag (sport=bouldering;climbing).
 func (e Expr) valueMatches(v string) bool {
-	for _, part := range strings.Split(v, ";") {
+	for part := range strings.SplitSeq(v, ";") {
 		part = strings.TrimSpace(part)
 		for _, want := range e.values {
 			if matchValue(want, part) {
