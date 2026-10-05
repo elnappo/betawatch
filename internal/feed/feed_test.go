@@ -289,6 +289,25 @@ func TestServesProblemsPage(t *testing.T) {
 	}
 }
 
+func TestServesMapPage(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/map.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	buf := make([]byte, 15)
+	resp.Body.Read(buf)
+	if !strings.HasPrefix(string(buf), "<!DOCTYPE html>") {
+		t.Errorf("body starts with %q", buf)
+	}
+}
+
 func TestServesIndexPage(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
 	defer srv.Close()

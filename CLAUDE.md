@@ -113,7 +113,13 @@ special.
   not the syntax.
 - For page changes, drive it in a headless browser rather than reading
   the diff: several real bugs here were only visible when rendered.
-- The web page has no build step and no dependencies. Keep it that way.
+- The web pages have no build step and no dependencies. Keep it that way.
+  The one exception is the live map (`internal/feed/map.html`): it loads
+  Leaflet (pinned version, SRI hashes) from unpkg and tiles from
+  `tile.openstreetmap.org`. The proxy's CSP must allow both, and the page
+  must not send `Referrer-Policy: no-referrer`, which OSM's tile servers
+  reject. The map starts empty and fills from `/events` only; it shows
+  nodes alone, since only nodes carry `lat`/`lon`.
 - Security headers are set by the proxy, not the app. If one is ever
   added back, `img-src` needs `https://*.wikimedia.org`, not just
   `commons.wikimedia.org`: CSP checks every URL in a redirect chain and
