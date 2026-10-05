@@ -523,3 +523,30 @@ rules:
         AND tag.key = 'climbing:multipitch'
         AND tag.value REGEXP '^[0-9]+$'
       ORDER BY e.id, e.type;
+  - name: "Gym tagged with climbing=boulder"
+    description: "Gyms should not be tagged with climbing=boulder. Add climbing:boulder=yes instead."
+    query: >
+      SELECT id, type
+      FROM elements
+      WHERE json_extract(tags, '$.leisure') IN ('sports_centre', 'sports_hall', 'pitch')
+        AND json_extract(tags, '$.sport') = 'climbing'
+        AND json_extract(tags, '$.climbing') = 'boulder'
+      ORDER BY id, type;
+  - name: "Leisure tagged with climbing"
+    description: "Non-gym elements should not be tagged with leisure=*."
+    query: >
+      SELECT id, type
+      FROM elements
+      WHERE json_extract(tags, '$.climbing') IN (
+          'route', 'route-bottom', 'crag', 'area', 'boulder'
+      )
+      AND json_type(tags, '$.leisure') IS NOT NULL
+      ORDER BY id, type;
+  - name: "Node or way tagged as area"
+    description: "Nodes and ways should not be tagged as climbing=area. Use climbing=crag instead."
+    query: >
+      SELECT id, type
+      FROM elements
+      WHERE type IN ('w', 'n')
+        AND json_extract(tags, '$.climbing') = 'area'
+      ORDER BY id, type;
