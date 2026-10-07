@@ -550,3 +550,12 @@ rules:
       WHERE type IN ('w', 'n')
         AND json_extract(tags, '$.climbing') = 'area'
       ORDER BY id, type;
+  - name: "Climbing route tagged with highway=*"
+    disabled: true
+    description: "A climbing route should not be tagged with highway=*."
+    query: >
+      SELECT id, type
+      FROM elements
+      WHERE json_extract(tags, '$.climbing') = 'route'
+        AND json_type(tags, '$.highway') IS NOT NULL
+      ORDER BY id, type;
