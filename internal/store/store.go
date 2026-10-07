@@ -463,6 +463,249 @@ func (s *Store) RunRule(query string) ([]RuleMatch, error) {
 	return out, rows.Err()
 }
 
+// Stats holds aggregate counts for the stats page. In-scope means the
+// element's climbing tag is one of: route, route_bottom, boulder, crag, area.
+type Stats struct {
+	// When these numbers were computed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Total in-scope elements, counted once.
+	Total int `json:"total"`
+
+	// Totals by climbing tag value.
+	ByClimbing map[string]ByType `json:"by_climbing"`
+
+	// Elements per style. climbing:style != 'no' counts as present.
+	Styles map[string]int `json:"styles"`
+
+	// Elements per grade system (the third segment of climbing:grade:*).
+	GradeSystems map[string]int `json:"grade_systems"`
+
+	// Completeness metrics, as "have/total" pairs.
+	RoutesWithName      [2]int `json:"routes_with_name"`
+	CragsWithName       [2]int `json:"crags_with_name"`
+	RoutesWithStyle     [2]int `json:"routes_with_style"`
+	CragsWithStyle      [2]int `json:"crags_with_style"`
+	RoutesWithGrade     [2]int `json:"routes_with_grade"`
+	RoutesWithLength    [2]int `json:"routes_with_length"`
+	CragsAreasWithPhoto [2]int `json:"crags_areas_with_photo"`
+	CragsAreasWithURL   [2]int `json:"crags_areas_with_url"`
+}
+
+// ByType splits a count into nodes, ways and relations.
+type ByType struct {
+	Total     int `json:"total"`
+	Nodes     int `json:"nodes"`
+	Ways      int `json:"ways"`
+	Relations int `json:"relations"`
+}
+
+// Stats returns aggregate statistics about in-scope climbing elements.
+// The scope is climbing tag values: route, route_bottom, boulder, crag, area.
+func (s *Store) Stats() (*Stats, error) {
+	st := &Stats{
+		UpdatedAt:    time.Now().UTC(),
+		ByClimbing:   make(map[string]ByType),
+		Styles:       make(map[string]int),
+		GradeSystems: make(map[string]int),
+	}
+
+	// Total in-scope elements.
+	if err := s.roDB.QueryRow(`
+		SELECT COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom', 'boulder', 'crag', 'area', 'anchor')
+	`).Scan(&st.Total); err != nil {
+		return nil, err
+	}
+
+	// Totals by climbing tag, split by type.
+	rows, err := s.roDB.Query(`
+		SELECT
+			json_extract(tags, '$.climbing') AS c,
+			type,
+			COUNT(*) AS cnt
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom', 'boulder', 'crag', 'area', 'anchor')
+		GROUP BY c, type
+		ORDER BY c
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var c string
+		var typ string
+		var cnt int
+		if err := rows.Scan(&c, &typ, &cnt); err != nil {
+			return nil, err
+		}
+		bt := st.ByClimbing[c]
+		bt.Total += cnt
+		switch typ {
+		case "n":
+			bt.Nodes = cnt
+		case "w":
+			bt.Ways = cnt
+		case "r":
+			bt.Relations = cnt
+		}
+		st.ByClimbing[c] = bt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Styles: sport, trad, boulder, deepwater, ice, mixed, dry, aid.
+	styles := []string{"sport", "trad", "boulder", "deepwater", "ice", "mixed", "dry", "aid"}
+	for _, style := range styles {
+		var count int
+		key := "climbing:" + style
+		if err := s.roDB.QueryRow(`
+			SELECT COUNT(DISTINCT id || ':' || type)
+			FROM elements
+			WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom', 'boulder', 'crag', 'area')
+			  AND json_extract(tags, '$."` + key + `"') IS NOT NULL
+			  AND json_extract(tags, '$."` + key + `"') != 'no'
+		`).Scan(&count); err != nil {
+			return nil, err
+		}
+		st.Styles[key] = count
+	}
+
+	// Grade systems: extract the third segment from climbing:grade:* keys.
+	rows, err = s.roDB.Query(`
+		SELECT
+			SUBSTR(je.key, 16) AS system,
+			COUNT(DISTINCT e.id || ':' || e.type) AS cnt
+		FROM elements e, json_each(e.tags) AS je
+		WHERE json_extract(e.tags, '$.climbing') IN ('route', 'route_bottom', 'boulder', 'crag', 'area')
+		  AND je.key LIKE 'climbing:grade:%'
+		  AND je.key NOT LIKE '%:min'
+		  AND je.key NOT LIKE '%:max'
+		  AND je.key NOT LIKE '%:mean'
+		GROUP BY system
+		ORDER BY cnt DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var system string
+		var count int
+		if err := rows.Scan(&system, &count); err != nil {
+			return nil, err
+		}
+		st.GradeSystems["climbing:grade:"+system] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Completeness: crags with name.
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN json_extract(tags, '$.name') IS NOT NULL THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') = 'crag'
+	`).Scan(&st.CragsWithName[0], &st.CragsWithName[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: routes and crags with at least one style set.
+	const hasStyle = `EXISTS (
+		SELECT 1 FROM json_each(tags)
+		WHERE key IN ('climbing:sport', 'climbing:trad', 'climbing:boulder', 'climbing:deepwater', 'climbing:ice', 'climbing:mixed', 'climbing:dry', 'climbing:aid')
+		  AND value != 'no'
+	)`
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN `+hasStyle+` THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
+	`).Scan(&st.RoutesWithStyle[0], &st.RoutesWithStyle[1]); err != nil {
+		return nil, err
+	}
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN `+hasStyle+` THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') = 'crag'
+	`).Scan(&st.CragsWithStyle[0], &st.CragsWithStyle[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: routes with name.
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN json_extract(tags, '$.name') IS NOT NULL THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
+	`).Scan(&st.RoutesWithName[0], &st.RoutesWithName[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: routes with grade.
+	if err := s.roDB.QueryRow(`
+		SELECT COUNT(DISTINCT id || ':' || type)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
+		  AND EXISTS (SELECT 1 FROM json_each(tags) WHERE key LIKE 'climbing:grade:%')
+	`).Scan(&st.RoutesWithGrade[0]); err != nil {
+		return nil, err
+	}
+	if err := s.roDB.QueryRow(`
+		SELECT COUNT(DISTINCT id || ':' || type)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
+	`).Scan(&st.RoutesWithGrade[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: routes with length.
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN json_extract(tags, '$."climbing:length"') IS NOT NULL THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
+	`).Scan(&st.RoutesWithLength[0], &st.RoutesWithLength[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: crags and areas with photo.
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN json_extract(tags, '$.wikimedia_commons') IS NOT NULL THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('crag', 'area')
+	`).Scan(&st.CragsAreasWithPhoto[0], &st.CragsAreasWithPhoto[1]); err != nil {
+		return nil, err
+	}
+
+	// Completeness: crags and areas with URL.
+	if err := s.roDB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN json_extract(tags, '$.website') IS NOT NULL OR json_extract(tags, '$.url') IS NOT NULL THEN 1 END),
+			COUNT(*)
+		FROM elements
+		WHERE json_extract(tags, '$.climbing') IN ('crag', 'area')
+	`).Scan(&st.CragsAreasWithURL[0], &st.CragsAreasWithURL[1]); err != nil {
+		return nil, err
+	}
+
+	return st, nil
+}
+
 // queryElementsBatch is how many (id, type) pairs go in one query's IN
 // clause. SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999 (2 bind
 // parameters per pair), and a single broad rule can match tens of

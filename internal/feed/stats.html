@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, nocache">
+    <title>BetaWatch — Statistics</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #1a1a1a;
+            --muted: #666;
+            --line: #e2e2e2;
+            --head: #f6f6f6;
+            --accent: #0a7d3f;
+            --track: #ececec;
+            --warn-edge: #b7791f;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181c;
+                --fg: #e8e8e8;
+                --muted: #9a9a9a;
+                --line: #2c2f36;
+                --head: #1e2127;
+                --accent: #4ade80;
+                --track: #2a2e36;
+                --warn-edge: #e3a53c;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+        }
+
+        header {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+            margin-right: auto;
+        }
+
+        a.site {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .hero {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 8px 0 20px;
+        }
+
+        .hero .big {
+            font-size: 40px;
+            line-height: 1.1;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -.02em;
+        }
+
+        .hero .sub {
+            color: var(--muted);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+            gap: 16px;
+            align-items: start;
+        }
+
+        section.card {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px 16px 6px;
+            background: var(--bg);
+        }
+
+        h2 {
+            margin: 0 0 4px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--muted);
+        }
+
+        .note {
+            margin: 0 0 8px;
+            font-size: 12.5px;
+            color: var(--muted);
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 2px 12px;
+            padding: 9px 0;
+            border-top: 1px solid var(--line);
+        }
+
+        .row:first-of-type {
+            border-top: none;
+        }
+
+        .row .name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .row .val {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .row .val small {
+            font-weight: 400;
+            color: var(--muted);
+            margin-left: 4px;
+        }
+
+        .row .meter {
+            grid-column: 1 / -1;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--track);
+            overflow: hidden;
+            display: flex;
+        }
+
+        .row .fill {
+            height: 100%;
+            background: var(--accent);
+            min-width: 0;
+        }
+
+        .row .fill.ways {
+            opacity: .6;
+        }
+
+        .row .fill.rels {
+            opacity: .3;
+        }
+
+        .row .detail {
+            grid-column: 1 / -1;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .row.low .fill {
+            background: var(--warn-edge);
+        }
+
+        .empty {
+            color: var(--muted);
+            padding: 10px 0 12px;
+        }
+
+        footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            align-items: center;
+            max-width: 1100px;
+            margin: 28px auto 0;
+            padding-top: 14px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 12.5px;
+        }
+
+        footer a {
+            color: inherit;
+        }
+
+        footer a:hover {
+            color: var(--fg);
+        }
+
+        footer svg {
+            vertical-align: -2px;
+            margin-right: 5px;
+        }
+
+        #loading {
+            color: var(--muted);
+            padding: 24px 0;
+        }
+
+        #error {
+            color: #d14;
+        }
+
+        #error:not(:empty) {
+            padding: 24px 0;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>BetaWatch</h1>
+    <a class="site" href="./">live feed</a>
+    <a class="site" href="map.html">map</a>
+    <a class="site" href="problems.html">problems</a>
+    <a class="site" href="stats.html" aria-current="page"><strong>stats</strong></a>
+</header>
+
+<main>
+    <div id="loading">Loading…</div>
+    <div id="error"></div>
+    <div id="content" hidden></div>
+</main>
+
+<footer>
+    <span id="updated"></span>
+    <a href="https://github.com/elnappo/betawatch/" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+        1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+        0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2
+        .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
+        3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+        </svg>
+        github.com/elnappo/betawatch
+    </a>
+    <span>
+    Data from <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>
+    contributors, available under the
+    <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>.
+  </span>
+</footer>
+
+<script>
+    const fmt = n => n.toLocaleString();
+    const pct = (have, total) => total ? (100 * have / total) : 0;
+    const pctText = p => (p > 0 && p < 1 ? '<1' : p > 99 && p < 100 ? '>99' : Math.round(p)) + '%';
+
+    function el(tag, className, text) {
+        const e = document.createElement(tag);
+        if (className) e.className = className;
+        if (text !== undefined) e.textContent = text;
+        return e;
+    }
+
+    function row(name, valueText, valueNote, segments, detail, low) {
+        const r = el('div', 'row' + (low ? ' low' : ''));
+        r.append(el('span', 'name', name));
+        const v = el('span', 'val', valueText);
+        if (valueNote) v.append(el('small', '', valueNote));
+        r.append(v);
+        const meter = el('div', 'meter');
+        for (const s of segments) {
+            const f = el('div', 'fill' + (s.cls ? ' ' + s.cls : ''));
+            f.style.width = Math.max(0, Math.min(100, s.width)) + '%';
+            meter.append(f);
+        }
+        r.append(meter);
+        if (detail) r.append(el('div', 'detail', detail));
+        return r;
+    }
+
+    function card(title, note) {
+        const c = el('section', 'card');
+        c.append(el('h2', '', title));
+        if (note) c.append(el('p', 'note', note));
+        return c;
+    }
+
+    function plural(n, word) {
+        return fmt(n) + ' ' + word + (n === 1 ? '' : 's');
+    }
+
+    function typeSplit(bt) {
+        const parts = [];
+        if (bt.nodes) parts.push(plural(bt.nodes, 'node'));
+        if (bt.ways) parts.push(plural(bt.ways, 'way'));
+        if (bt.relations) parts.push(plural(bt.relations, 'relation'));
+        return parts.join(' · ');
+    }
+
+    function render(stats) {
+        const content = document.getElementById('content');
+        content.replaceChildren();
+
+        const hero = el('div', 'hero');
+        hero.append(el('span', 'big', fmt(stats.total)), el('span', 'sub', 'climbing elements tracked'));
+        content.append(hero);
+
+        const grid = el('div', 'grid');
+
+        // Totals
+        const types = ['route', 'route_bottom', 'boulder', 'crag', 'area', 'anchor'];
+        const totals = card('By climbing tag', 'Segments show nodes, ways and relations.');
+        const maxTotal = Math.max(1, ...types.map(t => stats.by_climbing[t]?.total || 0));
+        for (const t of types) {
+            const bt = stats.by_climbing[t] || {total: 0, nodes: 0, ways: 0, relations: 0};
+            const scale = 100 * bt.total / maxTotal;
+            const share = n => bt.total ? scale * n / bt.total : 0;
+            totals.append(row(t, fmt(bt.total), '', [
+                {width: share(bt.nodes)},
+                {width: share(bt.ways), cls: 'ways'},
+                {width: share(bt.relations), cls: 'rels'},
+            ], typeSplit(bt)));
+        }
+        grid.append(totals);
+
+        // Styles
+        const styleDefs = ['sport', 'trad', 'boulder', 'deepwater', 'ice', 'mixed', 'dry', 'aid'];
+        const styles = card('Styles', 'Elements with climbing:<style> set to anything but “no”.');
+        const maxStyle = Math.max(1, ...styleDefs.map(s => stats.styles['climbing:' + s] || 0));
+        for (const s of styleDefs) {
+            const n = stats.styles['climbing:' + s] || 0;
+            styles.append(row(s, fmt(n), '', [{width: 100 * n / maxStyle}]));
+        }
+        grid.append(styles);
+
+        // Grade systems
+        const grades = card('Grade systems', 'Elements carrying at least one grade in each system.');
+        const sorted = Object.entries(stats.grade_systems || {})
+            .filter(([k]) => !/:(min|max|mean)$/.test(k))
+            .map(([k, n]) => [k.replace('climbing:grade:', ''), n])
+            .sort((a, b) => b[1] - a[1]);
+        if (sorted.length === 0) grades.append(el('div', 'empty', 'No grades stored yet.'));
+        for (const [name, n] of sorted) {
+            grades.append(row(name, fmt(n), '', [{width: 100 * n / sorted[0][1]}]));
+        }
+        grid.append(grades);
+
+        // Completeness
+        const complete = card('Completeness', 'How much of the data carries each detail.');
+        const metrics = [
+            ['Crags with a name', stats.crags_with_name],
+            ['Routes with a name', stats.routes_with_name],
+            ['Crags with a style', stats.crags_with_style],
+            ['Routes with a style', stats.routes_with_style],
+            ['Routes with a grade', stats.routes_with_grade],
+            ['Routes with a length', stats.routes_with_length],
+            ['Crags & areas with a photo', stats.crags_areas_with_photo],
+            ['Crags & areas with a website', stats.crags_areas_with_url],
+        ];
+        for (const [name, [have, total]] of metrics) {
+            const p = pct(have, total);
+            complete.append(row(name, pctText(p), '', [{width: p}], fmt(have) + ' of ' + fmt(total), p < 50));
+        }
+        grid.append(complete);
+
+        content.append(grid);
+
+        const updated = new Date(stats.updated_at);
+        const u = document.getElementById('updated');
+        u.textContent = 'Counts what BetaWatch has stored. Updated at ' +
+            (isNaN(updated) ? 'unknown time' : updated.toLocaleString());
+
+        document.getElementById('loading').hidden = true;
+        content.hidden = false;
+    }
+
+    async function load() {
+        try {
+            const res = await fetch('api/stats');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            render(await res.json());
+        } catch (err) {
+            document.getElementById('error').textContent = 'Failed to load: ' + err.message;
+            document.getElementById('loading').hidden = true;
+        }
+    }
+
+    load();
+</script>
+</body>
+</html>

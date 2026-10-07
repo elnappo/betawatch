@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elnappo/betawatch/internal/config"
@@ -64,7 +65,7 @@ func run(ctx context.Context, configPath string) error {
 	var broker *feed.Broker
 	if cfg.HTTPAddr != "" {
 		broker = feed.New()
-		if err := serve(ctx, cfg.HTTPAddr, broker, fetchHistory(cfg, db), fetchDiff(db), fetchProblems(cfg, db)); err != nil {
+		if err := serve(ctx, cfg.HTTPAddr, broker, fetchHistory(cfg, db), fetchDiff(db), fetchProblems(cfg, db), fetchStats(db)); err != nil {
 			return err
 		}
 	}
@@ -129,12 +130,12 @@ func latestTimestamp(db *store.Store) (time.Time, error) {
 }
 
 // serve starts the web view in the background.
-func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.HistoryFetcher, diff feed.DiffFetcher, problems feed.ProblemsFetcher) error {
+func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.HistoryFetcher, diff feed.DiffFetcher, problems feed.ProblemsFetcher, stats feed.StatsFetcher) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", addr, err)
 	}
-	srv := &http.Server{Handler: feed.NewHandler(broker, fetch, diff, problems)}
+	srv := &http.Server{Handler: feed.NewHandler(broker, fetch, diff, problems, stats)}
 
 	go func() {
 		<-ctx.Done()
@@ -289,6 +290,38 @@ func fetchProblems(cfg *config.Config, db *store.Store) feed.ProblemsFetcher {
 			out = append(out, data)
 		}
 		return out, nil
+	}
+}
+
+// fetchStats returns a StatsFetcher with a 30-minute in-memory cache.
+// The cache is computed on the first call and on every call after 30
+// minutes. If a refresh fails and a previous result exists, it serves the
+// old result.
+func fetchStats(db *store.Store) feed.StatsFetcher {
+	var mu sync.Mutex
+	var cached *store.Stats
+	var cacheTime time.Time
+
+	return func() (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if cached != nil && time.Since(cacheTime) < 30*time.Minute {
+			return cached, nil
+		}
+
+		stats, err := db.Stats()
+		if err != nil {
+			if cached != nil {
+				// Serve stale cache on error.
+				return cached, nil
+			}
+			return nil, err
+		}
+
+		cached = stats
+		cacheTime = time.Now()
+		return stats, nil
 	}
 }
 

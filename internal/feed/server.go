@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-//go:embed index.html problems.html map.html favicon.svg
+//go:embed index.html problems.html map.html stats.html favicon.svg
 var static embed.FS
 
 // HistoryFetcher returns one page of past changes, newest first, each
@@ -39,20 +39,26 @@ type DiffFetcher func(typ string, id int64, version int) (*PreviousVersion, erro
 // it broke.
 type ProblemsFetcher func() ([]json.RawMessage, error)
 
+// StatsFetcher returns aggregate statistics about climbing elements.
+type StatsFetcher func() (any, error)
+
 // NewHandler serves the review page, its history, its SSE stream, its
-// per-element diffs, the problems page and the live map. fetch supplies history pages,
-// diff supplies the previous-version lookups, problems supplies the
-// problems page's data, and the broker supplies the live stream.
-func NewHandler(b *Broker, fetch HistoryFetcher, diff DiffFetcher, problems ProblemsFetcher) http.Handler {
+// per-element diffs, the problems page, the live map and the stats page.
+// fetch supplies history pages, diff supplies the previous-version lookups,
+// problems supplies the problems page's data, stats supplies the stats
+// page's data, and the broker supplies the live stream.
+func NewHandler(b *Broker, fetch HistoryFetcher, diff DiffFetcher, problems ProblemsFetcher, stats StatsFetcher) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", http.FileServerFS(static))
 	mux.Handle("GET /problems.html", http.FileServerFS(static))
 	mux.Handle("GET /map.html", http.FileServerFS(static))
+	mux.Handle("GET /stats.html", http.FileServerFS(static))
 	mux.Handle("GET /favicon.svg", http.FileServerFS(static))
 	mux.HandleFunc("GET /robots.txt", serveRobots)
 	mux.HandleFunc("GET /api/changes", serveHistory(fetch))
 	mux.HandleFunc("GET /api/diff", serveDiff(diff))
 	mux.HandleFunc("GET /api/problems", serveProblems(problems))
+	mux.HandleFunc("GET /api/stats", serveStats(stats))
 	mux.HandleFunc("GET /events", b.serveEvents)
 	return mux
 }
@@ -154,6 +160,22 @@ func serveProblems(fetch ProblemsFetcher) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		json.NewEncoder(w).Encode(problems)
+	}
+}
+
+// serveStats returns aggregate climbing statistics.
+func serveStats(fetch StatsFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stats, err := fetch()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "stats: %v\n", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(stats)
 	}
 }
 

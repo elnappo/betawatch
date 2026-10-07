@@ -120,6 +120,11 @@ special.
   must not send `Referrer-Policy: no-referrer`, which OSM's tile servers
   reject. The map starts empty and fills from `/events` only; it shows
   nodes alone, since only nodes carry `lat`/`lon`.
+  
+  The stats page (`internal/feed/stats.html`) uses no external libraries.
+  Its data comes from `/api/stats`, which is cached for 30 minutes in memory.
+  The scope is five `climbing` tag values: `route`, `route_bottom`, `boulder`,
+  `crag` and `area`. Stats never include `route_top` or `anchor`.
 - Security headers are set by the proxy, not the app. If one is ever
   added back, `img-src` needs `https://*.wikimedia.org`, not just
   `commons.wikimedia.org`: CSP checks every URL in a redirect chain and

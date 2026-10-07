@@ -26,6 +26,11 @@ func noProblems() ([]json.RawMessage, error) {
 	return nil, nil
 }
 
+// noStats is a StatsFetcher for tests that do not exercise /api/stats.
+func noStats() (any, error) {
+	return nil, nil
+}
+
 func TestPublishReachesSubscriber(t *testing.T) {
 	b := New()
 	events, cancel := b.Subscribe()
@@ -43,6 +48,51 @@ func TestPublishReachesSubscriber(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no event delivered")
+	}
+}
+
+func TestServeStatsReturnsJSON(t *testing.T) {
+	stats := struct{ Total int }{Total: 42}
+	fetch := func() (any, error) { return stats, nil }
+
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, fetch))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/stats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var got struct{ Total int }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 42 {
+		t.Errorf("total = %d, want 42", got.Total)
+	}
+}
+
+func TestServesStatsPage(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/stats.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	buf := make([]byte, 15)
+	resp.Body.Read(buf)
+	if !strings.HasPrefix(string(buf), "<!DOCTYPE html>") {
+		t.Errorf("body starts with %q", buf)
 	}
 }
 
@@ -99,7 +149,7 @@ func TestSlowSubscriberIsDropped(t *testing.T) {
 
 func TestServeEventsStreamsSSE(t *testing.T) {
 	b := New()
-	srv := httptest.NewServer(NewHandler(b, noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(b, noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	req, err := http.NewRequest("GET", srv.URL+"/events", nil)
@@ -138,7 +188,7 @@ func TestServeHistoryReturnsFetchedChanges(t *testing.T) {
 		return []json.RawMessage{json.RawMessage(`{"id":1}`)}, "cursor-1", true, nil
 	}
 
-	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/changes")
@@ -174,7 +224,7 @@ func TestServeHistoryPassesBeforeAndLimit(t *testing.T) {
 		return nil, "", false, nil
 	}
 
-	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), fetch, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/changes?before=cursor-1&limit=5")
@@ -196,7 +246,7 @@ func TestServeDiffReturnsPreviousVersion(t *testing.T) {
 		return &PreviousVersion{Found: true, Tags: map[string]string{"sport": "climbing"}, Lat: &lat, Lon: &lon}, nil
 	}
 
-	srv := httptest.NewServer(NewHandler(New(), noHistory, diff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, diff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42&version=3")
@@ -215,7 +265,7 @@ func TestServeDiffReturnsPreviousVersion(t *testing.T) {
 }
 
 func TestServeDiffReportsNotFound(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42&version=1")
@@ -234,7 +284,7 @@ func TestServeDiffReportsNotFound(t *testing.T) {
 }
 
 func TestServeDiffRejectsMissingParams(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/diff?type=way&id=42")
@@ -252,7 +302,7 @@ func TestServeProblemsReturnsFetchedElements(t *testing.T) {
 		return []json.RawMessage{json.RawMessage(`{"id":1}`)}, nil
 	}
 
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, fetch))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, fetch, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/problems")
@@ -271,7 +321,7 @@ func TestServeProblemsReturnsFetchedElements(t *testing.T) {
 }
 
 func TestServesProblemsPage(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/problems.html")
@@ -290,7 +340,7 @@ func TestServesProblemsPage(t *testing.T) {
 }
 
 func TestServesMapPage(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/map.html")
@@ -309,7 +359,7 @@ func TestServesMapPage(t *testing.T) {
 }
 
 func TestServesIndexPage(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -328,7 +378,7 @@ func TestServesIndexPage(t *testing.T) {
 }
 
 func TestServesRobotsTxt(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/robots.txt")
@@ -353,7 +403,7 @@ func TestServesRobotsTxt(t *testing.T) {
 }
 
 func TestServesFavicon(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/favicon.svg")
@@ -378,7 +428,7 @@ func TestServesFavicon(t *testing.T) {
 }
 
 func TestPageLinksTheFavicon(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems))
+	srv := httptest.NewServer(NewHandler(New(), noHistory, noDiff, noProblems, noStats))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")

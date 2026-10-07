@@ -608,3 +608,102 @@ func TestOpenPathWithSpecialCharacters(t *testing.T) {
 		t.Errorf("database not created at the requested path: %v", err)
 	}
 }
+
+func TestStatsCountsInScopeElements(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+
+	apply(t, s, func(tx *Tx) {
+		// In-scope elements
+		el1 := Element{
+			ID: 1, Type: Node, Version: 1, Lat: &[]float64{47.5}[0], Lon: &[]float64{11.2}[0],
+			UID: 1, User: "u", Timestamp: now, Changeset: 100,
+			Tags: map[string]string{"climbing": "crag", "name": "Test Crag"},
+		}
+		must(t, tx.Save(el1))
+
+		el2 := Element{
+			ID: 2, Type: Node, Version: 1, Lat: &[]float64{47.6}[0], Lon: &[]float64{11.3}[0],
+			UID: 1, User: "u", Timestamp: now, Changeset: 101,
+			Tags: map[string]string{"climbing": "route", "name": "Test Route", "climbing:grade:french": "4a", "climbing:grade:french:max": "5a", "climbing:grade:uiaa:mean": "5", "climbing:trad": "yes", "climbing:sport": "no", "climbing:length": "20"},
+		}
+		must(t, tx.Save(el2))
+
+		el3 := Element{
+			ID: 3, Type: Way, Version: 1,
+			UID: 1, User: "u", Timestamp: now, Changeset: 102,
+			Tags: map[string]string{"climbing": "route_bottom"},
+		}
+		must(t, tx.Save(el3))
+
+		// Out-of-scope: typo'd climbing value
+		el4 := Element{
+			ID: 4, Type: Node, Version: 1, Lat: &[]float64{47.7}[0], Lon: &[]float64{11.4}[0],
+			UID: 1, User: "u", Timestamp: now, Changeset: 103,
+			Tags: map[string]string{"climbing": "bouldering"},
+		}
+		must(t, tx.Save(el4))
+
+		// Out-of-scope: not climbing
+		el5 := Element{
+			ID: 5, Type: Node, Version: 1, Lat: &[]float64{47.8}[0], Lon: &[]float64{11.5}[0],
+			UID: 1, User: "u", Timestamp: now, Changeset: 104,
+			Tags: map[string]string{"leisure": "sports_centre"},
+		}
+		must(t, tx.Save(el5))
+	})
+
+	st, err := s.Stats()
+	must(t, err)
+
+	if st.Total != 3 {
+		t.Errorf("total = %d, want 3 (only in-scope values)", st.Total)
+	}
+
+	if st.ByClimbing["crag"].Total != 1 || st.ByClimbing["crag"].Nodes != 1 {
+		t.Errorf("crag count = %+v, want {Total:1 Nodes:1}", st.ByClimbing["crag"])
+	}
+
+	if st.ByClimbing["route"].Total != 1 || st.ByClimbing["route"].Nodes != 1 {
+		t.Errorf("route count = %+v, want {Total:1 Nodes:1}", st.ByClimbing["route"])
+	}
+
+	if st.ByClimbing["route_bottom"].Total != 1 || st.ByClimbing["route_bottom"].Ways != 1 {
+		t.Errorf("route_bottom count = %+v, want {Total:1 Ways:1}", st.ByClimbing["route_bottom"])
+	}
+
+	if st.RoutesWithGrade != [2]int{1, 2} {
+		t.Errorf("routes with grade = %v, want [1 2]", st.RoutesWithGrade)
+	}
+
+	if st.RoutesWithName != [2]int{1, 2} {
+		t.Errorf("routes with name = %v, want [1 2]", st.RoutesWithName)
+	}
+
+	if st.RoutesWithStyle != [2]int{1, 2} {
+		t.Errorf("routes with style = %v, want [1 2]: climbing:sport=no must not count", st.RoutesWithStyle)
+	}
+
+	if st.CragsWithStyle != [2]int{0, 1} {
+		t.Errorf("crags with style = %v, want [0 1]", st.CragsWithStyle)
+	}
+
+	if st.CragsWithName != [2]int{1, 1} {
+		t.Errorf("crags with name = %v, want [1 1]", st.CragsWithName)
+	}
+
+	for _, k := range []string{"climbing:grade:french:max", "climbing:grade:uiaa:mean"} {
+		if _, ok := st.GradeSystems[k]; ok {
+			t.Errorf("%s should be ignored", k)
+		}
+	}
+	if st.Styles["climbing:trad"] != 1 || st.Styles["climbing:sport"] != 0 {
+		t.Errorf("styles = %v, want trad=1 sport=0", st.Styles)
+	}
+	if st.RoutesWithLength != [2]int{1, 2} {
+		t.Errorf("routes with length = %v, want [1 2]", st.RoutesWithLength)
+	}
+	if st.GradeSystems["climbing:grade:french"] != 1 {
+		t.Errorf("french grades = %d, want 1", st.GradeSystems["climbing:grade:french"])
+	}
+}
