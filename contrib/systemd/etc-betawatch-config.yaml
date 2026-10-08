@@ -173,7 +173,7 @@ rules:
       FROM elements AS e
       WHERE e.tags ->> '$.climbing' IN (
           'route',
-          'route-bottom',
+          'route_bottom',
           'crag',
           'area',
           'boulder'
@@ -229,7 +229,7 @@ rules:
       SELECT e.id, e.type
       FROM elements AS e
       JOIN json_each(e.tags) AS tag
-      WHERE e.tags ->> '$.climbing' IN ('route', 'route-bottom')
+      WHERE e.tags ->> '$.climbing' IN ('route', 'route_bottom')
         AND tag.key IN (
             'climbing:boulder',
             'climbing:sport',
@@ -252,7 +252,7 @@ rules:
       SELECT DISTINCT e.id, e.type
       FROM elements AS e
       JOIN json_each(e.tags) AS tag
-      WHERE e.tags ->> '$.climbing' IN ('route', 'route-bottom')
+      WHERE e.tags ->> '$.climbing' IN ('route', 'route_bottom')
         AND tag.key IN (
             'climbing:boulder',
             'climbing:sport',
@@ -509,7 +509,7 @@ rules:
     query: >
       SELECT DISTINCT e.id, e.type
       FROM elements AS e
-      WHERE json_extract(tags, '$.climbing') IN ('route', 'route-bottom')
+      WHERE json_extract(tags, '$.climbing') IN ('route', 'route_bottom')
         AND json_type(tags, '$."climbing:pitches"') IS NOT NULL
         AND json_type(tags, '$."climbing:multipitch"') IS NULL
       ORDER BY e.id, e.type;
@@ -519,7 +519,7 @@ rules:
     query: >
       SELECT DISTINCT e.id, e.type
       FROM elements AS e, json_each(e.tags) AS tag
-      WHERE json_extract(e.tags, '$.climbing') IN ('route', 'route-bottom')
+      WHERE json_extract(e.tags, '$.climbing') IN ('route', 'route_bottom')
         AND tag.key = 'climbing:multipitch'
         AND tag.value REGEXP '^[0-9]+$'
       ORDER BY e.id, e.type;
@@ -538,7 +538,7 @@ rules:
       SELECT id, type
       FROM elements
       WHERE json_extract(tags, '$.climbing') IN (
-          'route', 'route-bottom', 'crag', 'area', 'boulder'
+          'route', 'route_bottom', 'crag', 'area', 'boulder'
       )
       AND json_type(tags, '$.leisure') IS NOT NULL
       ORDER BY id, type;
