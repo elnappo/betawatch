@@ -83,7 +83,17 @@ type Store struct {
 	// rejects a write through it, so a mistake in a rule's SQL cannot
 	// corrupt the store it is reading.
 	roDB *sql.DB
+
+	// queryDB serves Query, which runs SQL written by an LLM. It is a
+	// separate connection pool so that a slow or hostile query can neither
+	// starve roDB (the problems and stats pages) nor use more than
+	// maxQueryConns connections.
+	queryDB *sql.DB
 }
+
+// maxQueryConns bounds how many Query calls run at once. A further call
+// waits for a free connection, until its context expires.
+const maxQueryConns = 4
 
 // Open opens or creates the database at path.
 func Open(path string) (*Store, error) {
@@ -113,13 +123,29 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, roDB: roDB}, nil
+
+	// mode=ro already makes SQLite reject writes; query_only is a second
+	// layer. Neither stops ATTACH, so checkReadOnly does that.
+	qq := url.Values{}
+	qq.Add("_pragma", "busy_timeout(5000)")
+	qq.Add("_pragma", "query_only(1)")
+	qq.Add("mode", "ro")
+	queryDB, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Opaque: url.PathEscape(path), RawQuery: qq.Encode()}).String())
+	if err != nil {
+		db.Close()
+		roDB.Close()
+		return nil, err
+	}
+	queryDB.SetMaxOpenConns(maxQueryConns)
+	return &Store{db: db, roDB: roDB, queryDB: queryDB}, nil
 }
 
 func (s *Store) Close() error {
 	err := s.db.Close()
-	if roErr := s.roDB.Close(); err == nil {
-		err = roErr
+	for _, c := range []*sql.DB{s.roDB, s.queryDB} {
+		if cerr := c.Close(); err == nil {
+			err = cerr
+		}
 	}
 	return err
 }

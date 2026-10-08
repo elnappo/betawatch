@@ -9,7 +9,13 @@ select:
 
 # Address to serve the live web view on (e.g., ":8080").
 # Read by betawatch-feed; empty to disable the web view.
-http_addr: ":8080"
+http_addr: "localhost:8080"
+
+# Serve a read-only MCP endpoint at /assistant, so an LLM can read the schema and
+# run SELECT queries. It has no authentication: restrict /assistant in the
+# reverse proxy before enabling it on a public address.
+# Read by betawatch-feed.
+mcp_enabled: true
 
 # Path to the shared SQLite database. betawatch-ingest writes it,
 # betawatch-feed reads it.

@@ -24,6 +24,7 @@ import (
 
 	"github.com/elnappo/betawatch/internal/config"
 	"github.com/elnappo/betawatch/internal/feed"
+	"github.com/elnappo/betawatch/internal/mcp"
 	"github.com/elnappo/betawatch/internal/store"
 )
 
@@ -65,7 +66,14 @@ func run(ctx context.Context, configPath string) error {
 	var broker *feed.Broker
 	if cfg.HTTPAddr != "" {
 		broker = feed.New()
-		if err := serve(ctx, cfg.HTTPAddr, broker, fetchHistory(cfg, db), fetchDiff(db), fetchProblems(cfg, db), fetchStats(db)); err != nil {
+		handler := feed.NewHandler(broker, fetchHistory(cfg, db), fetchDiff(db), fetchProblems(cfg, db), fetchStats(db))
+		if cfg.MCPEnabled {
+			mux := http.NewServeMux()
+			mux.Handle("/assistant", mcp.NewHandler(db))
+			mux.Handle("/", handler)
+			handler = mux
+		}
+		if err := serve(ctx, cfg.HTTPAddr, handler); err != nil {
 			return err
 		}
 	}
@@ -130,12 +138,12 @@ func latestTimestamp(db *store.Store) (time.Time, error) {
 }
 
 // serve starts the web view in the background.
-func serve(ctx context.Context, addr string, broker *feed.Broker, fetch feed.HistoryFetcher, diff feed.DiffFetcher, problems feed.ProblemsFetcher, stats feed.StatsFetcher) error {
+func serve(ctx context.Context, addr string, handler http.Handler) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", addr, err)
 	}
-	srv := &http.Server{Handler: feed.NewHandler(broker, fetch, diff, problems, stats)}
+	srv := &http.Server{Handler: handler}
 
 	go func() {
 		<-ctx.Done()
@@ -293,8 +301,8 @@ func fetchProblems(cfg *config.Config, db *store.Store) feed.ProblemsFetcher {
 	}
 }
 
-// fetchStats returns a StatsFetcher with a 30-minute in-memory cache.
-// The cache is computed on the first call and on every call after 30
+// fetchStats returns a StatsFetcher with a 120-minute in-memory cache.
+// The cache is computed on the first call and on every call after 120
 // minutes. If a refresh fails and a previous result exists, it serves the
 // old result.
 func fetchStats(db *store.Store) feed.StatsFetcher {
@@ -306,7 +314,7 @@ func fetchStats(db *store.Store) feed.StatsFetcher {
 		mu.Lock()
 		defer mu.Unlock()
 
-		if cached != nil && time.Since(cacheTime) < 30*time.Minute {
+		if cached != nil && time.Since(cacheTime) < 120*time.Minute {
 			return cached, nil
 		}
 

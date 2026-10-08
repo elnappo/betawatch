@@ -94,6 +94,18 @@ works as written): SQLite reads everything up to the next `.` or `[` as
 the key, so unlike some other JSON-path dialects a colon is never
 special.
 
+**The MCP endpoint runs untrusted SQL.** `/assistant` (`internal/mcp`, enabled by
+`mcp_enabled`) lets an LLM run queries, so unlike problem rules its input is
+not trusted. `Store.Query` uses a third connection, `queryDB`: `mode=ro`
+plus `query_only`, capped at four connections. What those do not stop is
+`ATTACH`, which creates a file, and `PRAGMA`. `modernc.org/sqlite` exposes
+no authorizer, so `checkReadOnly` instead requires a single statement that
+starts with `SELECT`, `WITH` or `VALUES`, scanning past string literals and
+comments so a `;` inside one is not read as a second statement. Results are
+capped at 10000 rows and a 10s context, which interrupts SQLite itself.
+There is no authentication; the proxy must restrict `/assistant`. Keep
+`checkReadOnly` strict: a keyword blocklist is the wrong tool here.
+
 ## Facts worth keeping
 
 - About 200 climbing changes a day worldwide, against roughly 4.3 million

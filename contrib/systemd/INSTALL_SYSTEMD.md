@@ -136,6 +136,18 @@ If `http_addr` is set in the config (default `:8080`), access the web view at:
 http://your-server:8080
 ```
 
+## MCP endpoint
+
+With `mcp_enabled: true`, `betawatch-feed` also serves a Model Context
+Protocol endpoint (streamable HTTP) at `http://your-server:8080/assistant`. It
+offers two read-only tools to an LLM: `get_schema` (tables, columns,
+indexes) and `query` (one `SELECT`, at most 10000 rows, cancelled after 10
+seconds).
+
+It has no authentication. Anyone who can reach the port can run queries,
+and a heavy one loads the server. Restrict `/assistant` in your reverse proxy
+(an IP allow-list or basic auth) before turning it on at a public address.
+
 ## Troubleshooting
 
 ### A service fails to start

@@ -40,6 +40,11 @@ type Config struct {
 	// Empty to disable.
 	HTTPAddr string `yaml:"http_addr"`
 
+	// MCPEnabled serves a read-only MCP endpoint at /assistant on HTTPAddr,
+	// letting an LLM query the database. It has no authentication, so it
+	// is off by default: restrict /assistant in the reverse proxy first.
+	MCPEnabled bool `yaml:"mcp_enabled"`
+
 	// BackfillDuration is how far back to catch up on first run.
 	BackfillDuration time.Duration `yaml:"backfill_duration"`
 
