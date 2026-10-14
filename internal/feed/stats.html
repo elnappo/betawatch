@@ -48,18 +48,47 @@
             align-items: baseline;
             gap: 12px;
             flex-wrap: wrap;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
 
         h1 {
             font-size: 18px;
             margin: 0;
-            margin-right: auto;
         }
 
-        a.site {
+        .brand-icon {
+            width: 22px;
+            height: 22px;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .header-info,
+        .page-links {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .page-links {
+            margin-left: auto;
+        }
+
+        .page-links a {
             color: var(--muted);
             font-size: 13px;
+            text-decoration: none;
+            border-bottom: 0;
+        }
+
+        .page-links a:hover,
+        .page-links a[aria-current="page"] {
+            color: var(--fg);
+        }
+
+        .page-links a[aria-current="page"] {
+            font-weight: 600;
         }
 
         main {
@@ -227,11 +256,15 @@
 </head>
 <body>
 <header>
-    <h1>BetaWatch</h1>
-    <a class="site" href="./">live feed</a>
-    <a class="site" href="map.html">map</a>
-    <a class="site" href="problems.html">problems</a>
-    <a class="site" href="stats.html" aria-current="page"><strong>stats</strong></a>
+    <h1><img class="brand-icon" src="favicon.svg" alt="">BetaWatch — Statistics</h1>
+    <nav class="page-links" aria-label="Pages">
+        <a href="./">live feed</a>
+        <a href="map.html">map</a>
+        <a href="problems.html">problems</a>
+        <a href="stats.html" aria-current="page">stats</a>
+        <a href="https://wiki.openstreetmap.org/wiki/Climbing" target="_blank" rel="noopener">OSM Wiki</a>
+        <a href="https://openclimbing.org/" target="_blank" rel="noopener">openclimbing.org</a>
+    </nav>
 </header>
 
 <main>

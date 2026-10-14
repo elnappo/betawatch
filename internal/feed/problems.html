@@ -60,15 +60,44 @@
             margin: 0;
         }
 
-        nav a {
+        .brand-icon {
+            width: 22px;
+            height: 22px;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .header-info,
+        .page-links {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .page-links {
+            margin-left: auto;
+        }
+
+        .page-links a {
             color: var(--muted);
             font-size: 13px;
+            text-decoration: none;
+            border-bottom: 0;
+        }
+
+        .page-links a:hover,
+        .page-links a[aria-current="page"] {
+            color: var(--fg);
+        }
+
+        .page-links a[aria-current="page"] {
+            font-weight: 600;
         }
 
         #count {
             color: var(--muted);
             font-size: 13px;
-            margin-left: auto;
         }
 
         button#refresh {
@@ -247,10 +276,19 @@
 </head>
 <body>
 <header>
-    <h1>BetaWatch — Problems</h1>
-    <nav><a href="./">live feed</a> · <a href="map.html">map</a> · <a href="stats.html">stats</a></nav>
-    <span id="count"></span>
-    <button id="refresh" type="button">Refresh</button>
+    <h1><img class="brand-icon" src="favicon.svg" alt="">BetaWatch — Problems</h1>
+    <div class="header-info">
+        <span id="count"></span>
+        <button id="refresh" type="button">Refresh</button>
+    </div>
+    <nav class="page-links" aria-label="Pages">
+        <a href="./">live feed</a>
+        <a href="map.html">map</a>
+        <a href="problems.html" aria-current="page">problems</a>
+        <a href="stats.html">stats</a>
+        <a href="https://wiki.openstreetmap.org/wiki/Climbing" target="_blank" rel="noopener">OSM Wiki</a>
+        <a href="https://openclimbing.org/" target="_blank" rel="noopener">openclimbing.org</a>
+    </nav>
 </header>
 
 <div class="wrap">

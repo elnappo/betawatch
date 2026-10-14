@@ -60,6 +60,41 @@
             margin: 0;
         }
 
+        .brand-icon {
+            width: 22px;
+            height: 22px;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .header-info,
+        .page-links {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .page-links {
+            margin-left: auto;
+        }
+
+        .page-links a {
+            color: var(--muted);
+            font-size: 13px;
+            text-decoration: none;
+            border-bottom: 0;
+        }
+
+        .page-links a:hover,
+        .page-links a[aria-current="page"] {
+            color: var(--fg);
+        }
+
+        .page-links a[aria-current="page"] {
+            font-weight: 600;
+        }
+
         #status {
             color: var(--muted);
             font-size: 13px;
@@ -85,12 +120,6 @@
         }
 
         #count {
-            color: var(--muted);
-            font-size: 13px;
-            margin-left: auto;
-        }
-
-        a.site {
             color: var(--muted);
             font-size: 13px;
         }
@@ -213,13 +242,19 @@
 </head>
 <body>
 <header>
-    <h1>BetaWatch — Map</h1>
-    <span id="status">connecting…</span>
-    <span id="count"></span>
-    <a class="site" href="./">live feed</a>
-    <a class="site" href="problems.html">problems</a>
-    <a class="site" href="stats.html">stats</a>
-    <a class="site" href="https://openclimbing.org/" target="_blank" rel="noopener">openclimbing.org</a>
+    <h1><img class="brand-icon" src="favicon.svg" alt="">BetaWatch — Map</h1>
+    <div class="header-info">
+        <span id="status">connecting…</span>
+        <span id="count"></span>
+    </div>
+    <nav class="page-links" aria-label="Pages">
+        <a href="./">live feed</a>
+        <a href="map.html" aria-current="page">map</a>
+        <a href="problems.html">problems</a>
+        <a href="stats.html">stats</a>
+        <a href="https://wiki.openstreetmap.org/wiki/Climbing" target="_blank" rel="noopener">OSM Wiki</a>
+        <a href="https://openclimbing.org/" target="_blank" rel="noopener">openclimbing.org</a>
+    </nav>
 </header>
 
 <div class="mapwrap">
