@@ -2,6 +2,10 @@
 config.yaml
 ingest-state.json
 betawatch*
+# The systemd units are named after the binaries they start, so they need
+# to be carved out of the ignore above.
+!contrib/systemd/betawatch-*.service
+!contrib/systemd/betawatch-*.timer
 
 # Created by https://www.toptal.com/developers/gitignore/api/jetbrains+all,go,macos,linux,windows
 # Edit at https://www.toptal.com/developers/gitignore?templates=jetbrains+all,go,macos,linux,windows

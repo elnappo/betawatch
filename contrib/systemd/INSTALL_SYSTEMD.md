@@ -3,7 +3,8 @@
 This guide explains how to install and run BetaWatch as two systemd
 services: `betawatch-ingest`, which follows the OSM minute diffs into a
 shared SQLite database, and `betawatch-feed`, which serves the web view
-from that database.
+from that database. A timer, `betawatch-check-commons.timer`, runs a daily
+check of the Wikimedia Commons files those elements reference.
 
 ## Prerequisites
 
@@ -64,7 +65,8 @@ sudo chmod 755 /usr/local/bin/betawatch-ingest /usr/local/bin/betawatch-feed
 ### 5. Install Systemd Service Files
 
 ```bash
-sudo cp betawatch-ingest.service betawatch-feed.service /etc/systemd/system/
+sudo cp betawatch-ingest.service betawatch-feed.service \
+    betawatch-check-commons.service betawatch-check-commons.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -74,11 +76,15 @@ sudo systemctl daemon-reload
 # Enable services to start on boot
 sudo systemctl enable betawatch-ingest betawatch-feed
 
+# Enable the daily Wikimedia Commons check and start its timer
+sudo systemctl enable --now betawatch-check-commons.timer
+
 # Start the services
 sudo systemctl start betawatch-ingest betawatch-feed
 
 # Check status
 sudo systemctl status betawatch-ingest betawatch-feed
+sudo systemctl list-timers betawatch-check-commons.timer
 ```
 
 ## Managing the Services
@@ -89,10 +95,12 @@ sudo systemctl status betawatch-ingest betawatch-feed
 # Real-time logs
 sudo journalctl -u betawatch-ingest -f
 sudo journalctl -u betawatch-feed -f
+sudo journalctl -u betawatch-check-commons -f
 
 # Last 50 lines
 sudo journalctl -u betawatch-ingest -n 50
 sudo journalctl -u betawatch-feed -n 50
+sudo journalctl -u betawatch-check-commons -n 50
 
 # Since a specific time
 sudo journalctl -u betawatch-ingest --since "2 hours ago"
@@ -136,6 +144,25 @@ If `http_addr` is set in the config (default `:8080`), access the web view at:
 http://your-server:8080
 ```
 
+## Wikimedia Commons check
+
+`betawatch-check-commons.timer` runs `betawatch-ingest -check-commons` once
+a day. It looks up every `wikimedia_commons` File: value of the stored
+elements that has not been checked yet, records the file's dimensions, size
+and MIME type in the `commons_files` table, and drops rows for files no
+element references anymore. Files are treated as immutable, so a file is
+looked up once, never again.
+
+Run the check immediately instead of waiting for the timer:
+
+```bash
+sudo systemctl start betawatch-check-commons.service
+sudo journalctl -u betawatch-check-commons -n 20
+```
+
+The problems page flags elements whose checked files are missing or
+invalid; elements whose files have not been checked yet are not flagged.
+
 ## MCP endpoint
 
 With `mcp_enabled: true`, `betawatch-feed` also serves a Model Context
@@ -176,9 +203,11 @@ This only affects `betawatch-ingest`.
 ## Uninstall
 
 ```bash
+sudo systemctl disable --now betawatch-check-commons.timer
 sudo systemctl stop betawatch-ingest betawatch-feed
 sudo systemctl disable betawatch-ingest betawatch-feed
-sudo rm /etc/systemd/system/betawatch-ingest.service /etc/systemd/system/betawatch-feed.service
+sudo rm /etc/systemd/system/betawatch-ingest.service /etc/systemd/system/betawatch-feed.service \
+        /etc/systemd/system/betawatch-check-commons.service /etc/systemd/system/betawatch-check-commons.timer
 sudo rm /usr/local/bin/betawatch-ingest /usr/local/bin/betawatch-feed
 sudo rm -rf /etc/betawatch /var/lib/betawatch
 sudo userdel betawatch

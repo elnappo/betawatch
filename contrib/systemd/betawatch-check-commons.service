@@ -1,0 +1,24 @@
+[Unit]
+Description=BetaWatch - Check Wikimedia Commons files of stored climbing elements
+Documentation=https://github.com/elnappo/betawatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=betawatch
+Group=betawatch
+WorkingDirectory=/var/lib/betawatch
+ExecStart=/usr/local/bin/betawatch-ingest -config /etc/betawatch/ingest.yaml -check-commons
+
+# A first check asks the API about thousands of files, one request per 50
+# with a pause between them. Killing it is safe: the database is written
+# once, at the end.
+TimeoutStartSec=30min
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/betawatch
