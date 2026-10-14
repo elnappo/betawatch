@@ -33,3 +33,18 @@ with the minute diffs, an element version already stored is never
 overwritten by an older one. The import commits periodically, so a rerun
 after a crash or interruption is cheap: only the elements committed since
 the last save reprocess.
+
+### Checking Wikimedia Commons metadata
+
+```bash
+go run ./cmd/ingest -config config.yaml -check-commons
+```
+
+Collects the distinct `File:` values from the `wikimedia_commons*` tags of
+the stored elements that the `commons_files` table does not have a row for
+yet, asks the Wikimedia Commons API about them in batches, and adds the
+answers: dimensions, size and MIME type, or the status the API reported
+(missing or invalid). Commons files are treated as immutable, so a file is
+looked up once and never again; the same run also drops rows for files no
+element references anymore. The command exits when done, and is safe to run
+while `betawatch-ingest` is following the minute diffs.

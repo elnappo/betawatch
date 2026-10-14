@@ -348,6 +348,19 @@
         td.colSpan = 5;
     }
 
+    // commonsURL returns the Wikimedia Commons page a wikimedia_commons tag
+    // points at, or null: File: and Category: values are pages, the
+    // numbered variants (wikimedia_commons:2, ...) hold them too, while a
+    // :path tag holds topo coordinates, not a page. Same links as the live
+    // feed.
+    function commonsURL(key, value) {
+        if (key !== 'wikimedia_commons' && !/^wikimedia_commons:\d+$/.test(key)) return null;
+        const v = (value || '').trim();
+        return /^(File|Category):/.test(v)
+            ? 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(v.replace(/ /g, '_'))
+            : null;
+    }
+
     // detailRow builds the hidden row holding the element's full tag set,
     // built lazily so a row that is never opened costs nothing.
     function detailRow(p) {
@@ -371,7 +384,19 @@
                 const kt = tr.insertCell();
                 kt.className = 'k';
                 kt.textContent = k;
-                tr.insertCell().textContent = tags[k];
+
+                const vt = tr.insertCell();
+                const href = commonsURL(k, tags[k]);
+                if (href) {
+                    const a = document.createElement('a');
+                    a.href = href;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    a.textContent = tags[k];
+                    vt.append(a);
+                } else {
+                    vt.textContent = tags[k];
+                }
             }
             box.append(table);
         } else {

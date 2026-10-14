@@ -115,6 +115,11 @@ There is no authentication; the proxy must restrict `/assistant`. Keep
   in memory and on disk.
 - 68 of 296 sampled changes carry a `wikimedia_commons` photo.
 - Requests to OSM and Commons must send a descriptive User-Agent.
+- `commons_files` mirrors the Wikimedia Commons files currently named by
+  `wikimedia_commons*` tags, one row per distinct tag value. Commons files
+  are treated as immutable: a title is looked up once, never re-checked,
+  so `betawatch-ingest -check-commons` only queries files that have no row
+  yet and drops rows for files no longer referenced.
 
 ## Conventions
 

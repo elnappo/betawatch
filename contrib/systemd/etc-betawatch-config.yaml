@@ -565,3 +565,28 @@ rules:
       WHERE json_extract(tags, '$.climbing') = 'route'
         AND json_type(tags, '$.highway') IS NOT NULL
       ORDER BY id, type;
+  - name: "Invalid Wiki Commons tag"
+    description: "A Wiki Commons item must start with 'File:' or 'Category:'."
+    query: >
+      SELECT e.id, e.type
+      FROM elements e, json_each(e.tags) j
+      WHERE j.key LIKE 'wikimedia_commons%'
+        AND j.key NOT LIKE '%:path'
+        AND j.value NOT LIKE 'File:%'
+        AND j.value NOT LIKE 'Category:%'
+      ORDER BY e.id, e.type;
+  - name: "Wikimedia Commons file missing or invalid"
+    description: "A wikimedia_commons File: value that has been checked should exist on Wikimedia Commons: its commons_files status is not 'ok'. Unchecked values (no commons_files row) are ignored."
+    query: >
+      SELECT DISTINCT e.id, e.type
+      FROM elements e, json_each(e.tags) j
+      WHERE j.key LIKE 'wikimedia_commons%'
+        AND j.key NOT LIKE '%:path'
+        AND j.value LIKE 'File:%'
+        AND EXISTS (
+            SELECT 1
+            FROM commons_files c
+            WHERE c.title = j.value
+              AND c.status != 'ok'
+        )
+      ORDER BY e.id, e.type;

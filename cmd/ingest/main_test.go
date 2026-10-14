@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"github.com/paulmach/osm"
 	"github.com/paulmach/osm/osmapi"
 
+	"github.com/elnappo/betawatch/internal/commons"
 	"github.com/elnappo/betawatch/internal/config"
 	"github.com/elnappo/betawatch/internal/store"
 )
@@ -206,5 +209,57 @@ func TestEnrichChangesetFetchesAndStoresMetadata(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Errorf("requests after second call = %d, want still 1", requests)
+	}
+}
+
+func TestFetchCommonsBatchesAtTheAPILimit(t *testing.T) {
+	var batches [][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		titles := strings.Split(r.URL.Query().Get("titles"), "|")
+		batches = append(batches, titles)
+
+		pages := make([]map[string]any, 0, len(titles))
+		for _, title := range titles {
+			if title == "File:F00.jpg" {
+				pages = append(pages, map[string]any{
+					"title":     title,
+					"imageinfo": []map[string]any{{"width": 100, "height": 200, "size": 300, "mime": "image/png"}},
+				})
+				continue
+			}
+			pages = append(pages, map[string]any{"title": title, "missing": true})
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"query": map[string]any{"pages": pages}}); err != nil {
+			t.Errorf("encoding response: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := commons.NewClient(srv.Client())
+	client.BaseURL = srv.URL
+
+	titles := make([]string, commons.MaxTitles+1)
+	for i := range titles {
+		titles[i] = fmt.Sprintf("File:F%02d.jpg", i)
+	}
+
+	files, err := fetchCommons(context.Background(), client, titles, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batches) != 2 {
+		t.Fatalf("requests = %d, want 2", len(batches))
+	}
+	if len(batches[0]) != commons.MaxTitles || len(batches[1]) != 1 {
+		t.Errorf("batch sizes = %d and %d, want %d and 1", len(batches[0]), len(batches[1]), commons.MaxTitles)
+	}
+	if len(files) != len(titles) {
+		t.Fatalf("len(files) = %d, want %d", len(files), len(titles))
+	}
+	if f := files[0]; f.Title != titles[0] || f.Status != commons.StatusOK || f.Width == nil || *f.Width != 100 {
+		t.Errorf("files[0] = %+v, want the first title with status ok and width 100", f)
+	}
+	if f := files[commons.MaxTitles]; f.Title != titles[commons.MaxTitles] || f.Status != commons.StatusMissing {
+		t.Errorf("files[%d] = %+v, want the second batch's title with status missing", commons.MaxTitles, f)
 	}
 }

@@ -62,3 +62,21 @@ CREATE TABLE IF NOT EXISTS elements_history (
 
 -- The primary keys already index (id, type) and (id, type, version).
 CREATE INDEX IF NOT EXISTS idx_elements_timestamp ON elements(timestamp);
+
+-- Wikimedia Commons files named by the wikimedia_commons* tags of live
+-- elements, one row per distinct tag value (many elements can name the same
+-- file, and one element can name several). Commons files are treated as
+-- immutable: `betawatch-ingest -check-commons` looks a title up once, when
+-- it is first referenced, and never again while its row exists; the same
+-- pass drops rows for files no element references anymore. A status other
+-- than 'ok' means width, height, size_bytes and mime are NULL: the file
+-- does not exist, the title is invalid, or the page carries no imageinfo.
+CREATE TABLE IF NOT EXISTS commons_files (
+    title TEXT PRIMARY KEY,
+    width INTEGER,
+    height INTEGER,
+    size_bytes INTEGER,
+    mime TEXT,
+    status TEXT NOT NULL CHECK (status IN ('ok', 'missing', 'invalid', 'no imageinfo')),
+    fetched_at DATETIME NOT NULL
+);

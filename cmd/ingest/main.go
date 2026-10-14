@@ -1,12 +1,15 @@
 // Command ingest follows the OSM minute diffs and stores the elements
 // selected by config.yaml in a SQLite database, keeping the versions they
 // replace. Given -import-pbf, it instead imports a pre-filtered planet PBF
-// file once and exits, rather than following the minute diffs.
+// file once and exits. Given -check-commons, it looks up the Wikimedia
+// Commons files those elements name that no check has looked up yet, then
+// exits.
 //
 // Usage:
 //
 //	ingest [-config config.yaml]
 //	ingest [-config config.yaml] -import-pbf climbing.osm.pbf
+//	ingest [-config config.yaml] -check-commons
 package main
 
 import (
@@ -26,6 +29,7 @@ import (
 	"github.com/paulmach/osm/osmpbf"
 	"github.com/paulmach/osm/replication"
 
+	"github.com/elnappo/betawatch/internal/commons"
 	"github.com/elnappo/betawatch/internal/config"
 	"github.com/elnappo/betawatch/internal/feed"
 	"github.com/elnappo/betawatch/internal/store"
@@ -40,9 +44,15 @@ const pollInterval = 30 * time.Second
 // ignores versions already stored.
 const importBatchSize = 5000
 
+// commonsPause is the pause between Commons API requests. A check is a few
+// dozen requests at most, and this keeps it well inside the API's rate
+// limits.
+const commonsPause = time.Second
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "Specify config file path")
 	importPBF := flag.String("import-pbf", "", "Import a pre-filtered planet PBF file, then exit")
+	checkCommons := flag.Bool("check-commons", false, "Look up Wikimedia Commons files not checked yet, then exit")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -54,9 +64,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if *importPBF != "" {
+	switch {
+	case *importPBF != "":
 		err = runImport(ctx, cfg.DbPath, *importPBF)
-	} else {
+	case *checkCommons:
+		err = runCheckCommons(ctx, cfg)
+	default:
 		err = run(ctx, cfg, cfg.DbPath, cfg.IngestStatePath, cfg.BackfillDuration)
 	}
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -130,6 +143,83 @@ func runImport(ctx context.Context, dbPath, pbfPath string) error {
 	}
 	fmt.Fprintf(os.Stderr, "import complete: %d elements from %s\n", total, pbfPath)
 	return nil
+}
+
+// runCheckCommons looks up the Wikimedia Commons files of the stored
+// elements that have no commons_files row yet, and adds them. A file already
+// checked is never looked up again: Commons files are treated as immutable.
+// The same transaction drops rows for files no element references anymore,
+// so the table mirrors the current attachments without re-checking them. It
+// is safe to run while another ingest is following the minute diffs: the
+// database is WAL, and the write itself is one short transaction.
+func runCheckCommons(ctx context.Context, cfg *config.Config) error {
+	db, err := store.Open(cfg.DbPath)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+
+	titles, err := db.UncheckedCommonsTitles()
+	if err != nil {
+		return fmt.Errorf("reading unchecked commons titles: %w", err)
+	}
+	if len(titles) == 0 {
+		fmt.Fprintln(os.Stderr, "no new files")
+	} else {
+		fmt.Fprintf(os.Stderr, "%d new files\n", len(titles))
+	}
+
+	client := commons.NewClient(&http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &agentTransport{},
+	})
+
+	files, err := fetchCommons(ctx, client, titles, commonsPause)
+	if err != nil {
+		return err
+	}
+	if err := db.AddCommonsFiles(files); err != nil {
+		return fmt.Errorf("saving commons files: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "added %d files\n", len(files))
+	return nil
+}
+
+// fetchCommons asks the API about every title, in batches, and converts the
+// answers to rows. pause is the wait between requests.
+func fetchCommons(ctx context.Context, client *commons.Client, titles []string, pause time.Duration) ([]store.CommonsFile, error) {
+	var files []store.CommonsFile
+	for i := 0; i < len(titles); i += commons.MaxTitles {
+		batch := titles[i:min(i+commons.MaxTitles, len(titles))]
+		infos, err := client.Query(ctx, batch)
+		if err != nil {
+			return nil, fmt.Errorf("querying files %d..%d: %w", i+1, i+len(batch), err)
+		}
+		for _, info := range infos {
+			files = append(files, toCommonsFile(info))
+		}
+		fmt.Fprintf(os.Stderr, "%d/%d files\n", i+len(batch), len(titles))
+		if i+len(batch) < len(titles) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(pause):
+			}
+		}
+	}
+	return files, nil
+}
+
+// toCommonsFile converts one API answer to the row AddCommonsFiles writes.
+func toCommonsFile(f commons.File) store.CommonsFile {
+	return store.CommonsFile{
+		Title:     f.Title,
+		Width:     f.Width,
+		Height:    f.Height,
+		SizeBytes: f.SizeBytes,
+		MIME:      f.MIME,
+		Status:    f.Status,
+	}
 }
 
 func run(ctx context.Context, cfg *config.Config, dbPath, statePath string, backfill time.Duration) error {
